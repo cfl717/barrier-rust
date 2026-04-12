@@ -19,6 +19,7 @@ nix = { version = "0.29", features = ["event"], optional = true }
 wayland-client = { version = "0.31", optional = true }
 wayland-protocols = { version = "0.31", features = ["client", "staging", "unstable"], optional = true }
 wayland-protocols-wlr = { version = "0.2", features = ["client"], optional = true }
+wayland-protocols-misc = { version = "0.3", features = ["client"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
@@ -42,5 +43,5 @@ tokio = { version = "1", features = ["full"] }
 [features]
 default = ["x11"]
 x11 = ["dep:x11rb", "dep:nix"]
-wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr"]
+wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr", "dep:wayland-protocols-misc"]
 test-mock = []

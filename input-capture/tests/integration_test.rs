@@ -72,7 +72,7 @@ mod tests {
         };
 
         let test_content = "Test clipboard content";
-        
+
         // Set clipboard
         let result = capture.set_clipboard(test_content);
         assert!(result.is_ok());

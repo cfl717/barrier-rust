@@ -58,6 +58,12 @@ pub enum PlatformError {
 
     #[error("Display server error: {0}")]
     DisplayError(String),
+
+    #[error("Not initialized")]
+    NotInitialized,
+
+    #[error("Not supported: {0}")]
+    NotSupportedWithMessage(String),
 }
 
 /// Get the appropriate platform implementation
