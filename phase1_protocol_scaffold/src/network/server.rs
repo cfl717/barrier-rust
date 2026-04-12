@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, Mutex};
 pub const BARRIER_PORT: u16 = 24800;
 
 /// Server configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ServerConfig {
     /// Server screen name
     pub screen_name: String,
@@ -131,12 +131,10 @@ async fn handle_client(
     event_tx: mpsc::Sender<ServerEvent>,
     config: ServerConfig,
 ) -> ProtocolResult<()> {
-    use tokio::io::split;
-    
-    let (read_half, mut write_half) = connection.split();
+    let (mut read_half, mut write_half) = connection.split();
     
     // Perform handshake
-    let handshake_result = match server_handshake(&mut write_half, &mut read_half.into_inner()).await {
+    let handshake_result = match server_handshake(&mut write_half, &mut read_half).await {
         Ok(result) => {
             info!("Handshake completed with client {}: {:?}", client_id, result);
             

@@ -41,46 +41,38 @@ fn greet(name: &str) -> String {
 async fn start_server(state: tauri::State<'_, Arc<Mutex<BarrierState>>>, config: ServerConfig) -> Result<(), String> {
     let mut state_guard = state.lock().await;
     
-    match BarrierServer::new(config).await {
-        Ok(server) => {
-            let server_arc = Arc::new(Mutex::new(server));
-            state_guard.server = Some(server_arc.clone());
-            
-            // Start server in background
-            tokio::spawn(async move {
-                let mut server = server_arc.lock().await;
-                if let Err(e) = server.run().await {
-                    log::error!("Server error: {}", e);
-                }
-            });
-            
-            Ok(())
+    let (server, _event_rx) = BarrierServer::new(config);
+    let server_arc = Arc::new(Mutex::new(server));
+    state_guard.server = Some(server_arc.clone());
+    
+    // Start server in background
+    tokio::spawn(async move {
+        let mut server = server_arc.lock().await;
+        if let Err(e) = server.run().await {
+            log::error!("Server error: {}", e);
         }
-        Err(e) => Err(format!("Failed to start server: {}", e)),
-    }
+    });
+    
+    Ok(())
 }
 
 #[tauri::command]
 async fn start_client(state: tauri::State<'_, Arc<Mutex<BarrierState>>>, config: ClientConfig) -> Result<(), String> {
     let mut state_guard = state.lock().await;
     
-    match BarrierClient::new(config).await {
-        Ok(client) => {
-            let client_arc = Arc::new(Mutex::new(client));
-            state_guard.client = Some(client_arc.clone());
-            
-            // Start client in background
-            tokio::spawn(async move {
-                let mut client = client_arc.lock().await;
-                if let Err(e) = client.run().await {
-                    log::error!("Client error: {}", e);
-                }
-            });
-            
-            Ok(())
+    let client = BarrierClient::new(config);
+    let client_arc = Arc::new(Mutex::new(client));
+    state_guard.client = Some(client_arc.clone());
+    
+    // Start client in background
+    tokio::spawn(async move {
+        let mut client = client_arc.lock().await;
+        if let Err(e) = client.run().await {
+            log::error!("Client error: {}", e);
         }
-        Err(e) => Err(format!("Failed to start client: {}", e)),
-    }
+    });
+    
+    Ok(())
 }
 
 #[tauri::command]

@@ -1,5 +1,5 @@
 //! macOS Platform Implementation (stub)
-//! 
+//!
 //! This module provides macOS-specific input handling.
 
 use super::{PlatformError, PlatformInput};
@@ -17,7 +17,7 @@ impl MacOsInput {
 }
 
 impl PlatformInput for MacOsInput {
-    fn initialize() -> Result<(), PlatformError> {
+    fn initialize(&self) -> Result<(), PlatformError> {
         log::info!("macOS input system initialized (stub)");
         Ok(())
     }

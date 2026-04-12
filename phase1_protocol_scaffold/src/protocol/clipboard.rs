@@ -1,5 +1,5 @@
 //! Barrier Clipboard Protocol Support
-//! 
+//!
 //! This module handles clipboard data exchange between client and server.
 
 use super::message::{Message, MessageType, ProtocolResult};
@@ -7,7 +7,7 @@ use crate::protocol::message::message_types::*;
 use serde::{Deserialize, Serialize};
 
 /// Clipboard data formats supported by Barrier
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClipboardFormat {
     /// Plain text
     Text,
@@ -105,14 +105,14 @@ pub fn create_grab_message(format: ClipboardFormat, sequence_id: u32) -> Message
 /// Create a clipboard data message
 pub fn create_data_message(data: &ClipboardData) -> Message {
     let mut content = Vec::new();
-    
+
     // Format: format\nsequence_id\ncontent
     content.extend_from_slice(data.format.as_str().as_bytes());
     content.push(b'\n');
     content.extend_from_slice(data.sequence_id.to_string().as_bytes());
     content.push(b'\n');
     content.extend_from_slice(&data.content);
-    
+
     Message::new(CLIPBOARD, content)
 }
 
@@ -125,48 +125,49 @@ pub fn create_clear_message() -> Message {
 pub fn parse_grab_message(msg: &Message) -> ProtocolResult<(ClipboardFormat, u32)> {
     let text = msg.as_string()?;
     let parts: Vec<&str> = text.split('\n').collect();
-    
+
     if parts.len() < 2 {
         return Err(super::message::ProtocolError::InvalidMessageSize {
             expected: 2,
             actual: parts.len(),
         });
     }
-    
+
     let format = ClipboardFormat::from_str(parts[0]);
     let sequence_id: u32 = parts[1].parse().unwrap_or(0);
-    
+
     Ok((format, sequence_id))
 }
 
 /// Parse clipboard data message
 pub fn parse_data_message(msg: &Message) -> ProtocolResult<ClipboardData> {
-    let text = std::str::from_utf8(&msg.data).map_err(|e| {
-        super::message::ProtocolError::InvalidUtf8(e)
-    })?;
-    
+    let text = std::str::from_utf8(&msg.data)
+        .map_err(|e| super::message::ProtocolError::InvalidUtf8Str(e))?;
+
     // Find the first two newlines to separate header from content
     let mut parts = text.splitn(3, '\n');
-    
-    let format_str = parts.next().ok_or_else(|| {
-        super::message::ProtocolError::InvalidMessageSize {
-            expected: 3,
-            actual: 0,
-        }
-    })?;
-    
-    let sequence_str = parts.next().ok_or_else(|| {
-        super::message::ProtocolError::InvalidMessageSize {
-            expected: 3,
-            actual: 1,
-        }
-    })?;
-    
+
+    let format_str =
+        parts
+            .next()
+            .ok_or_else(|| super::message::ProtocolError::InvalidMessageSize {
+                expected: 3,
+                actual: 0,
+            })?;
+
+    let sequence_str =
+        parts
+            .next()
+            .ok_or_else(|| super::message::ProtocolError::InvalidMessageSize {
+                expected: 3,
+                actual: 1,
+            })?;
+
     let content = parts.next().unwrap_or("");
-    
+
     let format = ClipboardFormat::from_str(format_str);
     let sequence_id: u32 = sequence_str.parse().unwrap_or(0);
-    
+
     Ok(ClipboardData {
         format,
         sequence_id,
@@ -181,13 +182,22 @@ mod tests {
     #[test]
     fn test_clipboard_format_parsing() {
         assert_eq!(ClipboardFormat::from_str("text"), ClipboardFormat::Text);
-        assert_eq!(ClipboardFormat::from_str("UTF8_TEXT"), ClipboardFormat::Text);
-        assert_eq!(ClipboardFormat::from_str("text/plain"), ClipboardFormat::Text);
+        assert_eq!(
+            ClipboardFormat::from_str("UTF8_TEXT"),
+            ClipboardFormat::Text
+        );
+        assert_eq!(
+            ClipboardFormat::from_str("text/plain"),
+            ClipboardFormat::Text
+        );
         assert_eq!(ClipboardFormat::from_str("html"), ClipboardFormat::Html);
         assert_eq!(ClipboardFormat::from_str("RTF"), ClipboardFormat::Rtf);
         assert_eq!(ClipboardFormat::from_str("bmp"), ClipboardFormat::Bitmap);
         assert_eq!(ClipboardFormat::from_str("png"), ClipboardFormat::Png);
-        assert_eq!(ClipboardFormat::from_str("unknown"), ClipboardFormat::Unknown);
+        assert_eq!(
+            ClipboardFormat::from_str("unknown"),
+            ClipboardFormat::Unknown
+        );
     }
 
     #[test]
@@ -202,7 +212,7 @@ mod tests {
     fn test_create_grab_message() {
         let msg = create_grab_message(ClipboardFormat::Text, 42);
         assert_eq!(msg.msg_type, CLIPBOARD_GRAB);
-        
+
         let (format, seq) = parse_grab_message(&msg).unwrap();
         assert_eq!(format, ClipboardFormat::Text);
         assert_eq!(seq, 42);
@@ -213,7 +223,7 @@ mod tests {
         let data = ClipboardData::text("Test content", 5);
         let msg = create_data_message(&data);
         assert_eq!(msg.msg_type, CLIPBOARD);
-        
+
         let parsed = parse_data_message(&msg).unwrap();
         assert_eq!(parsed.format, ClipboardFormat::Text);
         assert_eq!(parsed.sequence_id, 5);

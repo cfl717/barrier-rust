@@ -8,7 +8,7 @@ use log::{error, info, warn};
 use tokio::net::TcpStream;
 
 /// Client configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClientConfig {
     /// Server address (hostname:port or IP:port)
     pub server_addr: String,
@@ -32,7 +32,7 @@ impl Default for ClientConfig {
 }
 
 /// Client state
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientState {
     Disconnected,
     Connecting,
@@ -63,7 +63,7 @@ impl BarrierClient {
 
     /// Get current state
     pub fn state(&self) -> ClientState {
-        self.state
+        self.state.clone()
     }
 
     /// Check if connected and ready
@@ -98,7 +98,7 @@ impl BarrierClient {
         
         let handshake_result = match client_handshake(
             &mut write_half,
-            &mut read_half.into_inner(),
+            &mut read_half,
             &self.config.screen_name,
         ).await {
             Ok(result) => result,

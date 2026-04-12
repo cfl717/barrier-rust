@@ -35,11 +35,15 @@ pub struct HandshakeResult {
 }
 
 /// Perform client-side handshake
-pub async fn client_handshake(
-    writer: &mut impl tokio::io::AsyncWrite + Unpin,
-    reader: &mut impl tokio::io::AsyncRead + Unpin,
+pub async fn client_handshake<W, R>(
+    writer: &mut W,
+    reader: &mut R,
     screen_name: &str,
-) -> ProtocolResult<HandshakeResult> {
+) -> ProtocolResult<HandshakeResult>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+    R: tokio::io::AsyncRead + Unpin,
+{
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     
     let mut reader = BufReader::new(reader);
@@ -48,8 +52,8 @@ pub async fn client_handshake(
     let hello_data = format!("{}\n{}\n", BARRIER_VERSION, screen_name);
     let hello_msg = Message::from_string(HELLO_SERVER, &hello_data);
     let hello_bytes = hello_msg.serialize()?;
-    writer.write_all(&hello_bytes).await?;
-    writer.flush().await?;
+    tokio::io::AsyncWriteExt::write_all(writer, &hello_bytes).await?;
+    tokio::io::AsyncWriteExt::flush(writer).await?;
     
     log::info!("Sent client hello: {} {}", BARRIER_VERSION, screen_name);
     
@@ -90,10 +94,14 @@ pub async fn client_handshake(
 }
 
 /// Perform server-side handshake
-pub async fn server_handshake(
-    writer: &mut impl tokio::io::AsyncWrite + Unpin,
-    reader: &mut impl tokio::io::AsyncRead + Unpin,
-) -> ProtocolResult<HandshakeResult> {
+pub async fn server_handshake<W, R>(
+    writer: &mut W,
+    reader: &mut R,
+) -> ProtocolResult<HandshakeResult>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+    R: tokio::io::AsyncRead + Unpin,
+{
     use tokio::io::{AsyncBufReadExt, BufReader};
     
     let mut reader = BufReader::new(reader);
@@ -135,8 +143,8 @@ pub async fn server_handshake(
     let response_data = format!("{}\n{}\n", BARRIER_VERSION, "server");
     let response_msg = Message::from_string(HELLO_CLIENT, &response_data);
     let response_bytes = response_msg.serialize()?;
-    writer.write_all(&response_bytes).await?;
-    writer.flush().await?;
+    tokio::io::AsyncWriteExt::write_all(writer, &response_bytes).await?;
+    tokio::io::AsyncWriteExt::flush(writer).await?;
     
     log::info!("Sent server hello: {}", BARRIER_VERSION);
     
@@ -144,9 +152,12 @@ pub async fn server_handshake(
 }
 
 /// Read a complete message from the stream
-async fn read_message(
-    reader: &mut impl tokio::io::AsyncBufRead + Unpin,
-) -> ProtocolResult<Message> {
+async fn read_message<R>(
+    reader: &mut R,
+) -> ProtocolResult<Message>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
     use tokio::io::AsyncReadExt;
     
     // Read size (4 bytes)

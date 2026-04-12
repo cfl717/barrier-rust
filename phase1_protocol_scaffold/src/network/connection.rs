@@ -47,7 +47,7 @@ impl Connection {
     }
 
     /// Split the connection into read and write halves
-    pub fn split(self) -> (tokio::io::ReadHalf<TcpStream>, tokio::io::WriteHalf<TcpStream>) {
+    pub fn split(self) -> (tokio::net::tcp::OwnedReadHalf, tokio::net::tcp::OwnedWriteHalf) {
         self.stream.into_split()
     }
 

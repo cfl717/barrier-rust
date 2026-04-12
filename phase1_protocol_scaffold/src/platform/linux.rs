@@ -1,5 +1,5 @@
 //! Linux Platform Implementation
-//! 
+//!
 //! This module provides Linux-specific input handling via X11/Wayland.
 
 use super::{PlatformError, PlatformInput};

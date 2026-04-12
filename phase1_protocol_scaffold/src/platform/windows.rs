@@ -1,5 +1,5 @@
 //! Windows Platform Implementation (stub)
-//! 
+//!
 //! This module provides Windows-specific input handling.
 
 use super::{PlatformError, PlatformInput};
