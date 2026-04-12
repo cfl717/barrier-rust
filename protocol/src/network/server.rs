@@ -17,19 +17,50 @@ pub const BARRIER_PORT: u16 = 24800;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ServerConfig {
     /// Server screen name
+    #[serde(default = "default_screen_name")]
     pub screen_name: String,
     /// Port to listen on
+    #[serde(default = "default_port")]
     pub port: u16,
     /// Maximum number of connected clients
+    #[serde(default = "default_max_clients")]
     pub max_clients: usize,
+    /// Listen address (for frontend compatibility, maps to port)
+    #[serde(default, alias = "address", skip_serializing_if = "Option::is_none")]
+    pub listen_address: Option<String>,
+    /// Enable clipboard sharing
+    #[serde(default = "default_true")]
+    pub enable_clipboard: bool,
+    /// Enable file drag-drop
+    #[serde(default = "default_true")]
+    pub enable_drag_drop: bool,
+}
+
+fn default_screen_name() -> String {
+    "server".to_string()
+}
+
+fn default_port() -> u16 {
+    BARRIER_PORT
+}
+
+fn default_max_clients() -> usize {
+    10
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            screen_name: "server".to_string(),
-            port: BARRIER_PORT,
-            max_clients: 10,
+            screen_name: default_screen_name(),
+            port: default_port(),
+            max_clients: default_max_clients(),
+            listen_address: None,
+            enable_clipboard: default_true(),
+            enable_drag_drop: default_true(),
         }
     }
 }
@@ -70,7 +101,16 @@ pub enum ServerEvent {
 
 impl BarrierServer {
     /// Create a new server instance
-    pub fn new(config: ServerConfig) -> (Self, mpsc::Receiver<ServerEvent>) {
+    pub fn new(mut config: ServerConfig) -> (Self, mpsc::Receiver<ServerEvent>) {
+        // Parse listen_address if provided to extract port
+        if let Some(ref addr) = config.listen_address {
+            if let Some(port_str) = addr.split(':').last() {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    config.port = port;
+                }
+            }
+        }
+        
         let (tx, rx) = mpsc::channel(100);
         
         (

@@ -11,22 +11,50 @@ use tokio::net::TcpStream;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClientConfig {
     /// Server address (hostname:port or IP:port)
+    #[serde(default = "default_server_addr", alias = "server_address")]
     pub server_addr: String,
     /// Client screen name
+    #[serde(default = "default_client_screen_name", alias = "client_name")]
     pub screen_name: String,
     /// Auto-reconnect on disconnect
+    #[serde(default = "default_true")]
     pub auto_reconnect: bool,
     /// Reconnect interval in seconds
+    #[serde(default = "default_reconnect_interval")]
     pub reconnect_interval: u64,
+    /// Enable clipboard sharing
+    #[serde(default = "default_true")]
+    pub enable_clipboard: bool,
+    /// Enable file drag-drop
+    #[serde(default = "default_true")]
+    pub enable_drag_drop: bool,
+}
+
+fn default_server_addr() -> String {
+    "localhost:24800".to_string()
+}
+
+fn default_client_screen_name() -> String {
+    "client".to_string()
+}
+
+fn default_reconnect_interval() -> u64 {
+    5
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            server_addr: "localhost:24800".to_string(),
-            screen_name: "client".to_string(),
-            auto_reconnect: true,
-            reconnect_interval: 5,
+            server_addr: default_server_addr(),
+            screen_name: default_client_screen_name(),
+            auto_reconnect: default_true(),
+            reconnect_interval: default_reconnect_interval(),
+            enable_clipboard: default_true(),
+            enable_drag_drop: default_true(),
         }
     }
 }
