@@ -28,6 +28,7 @@
 ├── PROJECT_STRUCTURE.md               # 详细项目结构文档
 ├── GUI_ALTERNATIVES_EVALUATION.md     # GUI 方案评估报告
 ├── BARRIER_RUST_REWRITE_COMPLETE.md   # 完整重构实施报告
+├── PHASE2_INTEGRATION_TESTING.md      # Phase 2 测试与优化指南
 │
 ├── phase1_protocol_scaffold/          # Phase 1: 协议层 ✅
 │   ├── Cargo.toml
@@ -37,13 +38,21 @@
 │   │   └── platform/                  # 平台抽象层
 │   └── examples/                      # 可运行示例
 │
+├── phase2_input_capture/              # Phase 2: 输入捕获层 ✅
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs                     # 公共 API
+│   │   └── platform/                  # 平台特定实现
+│   │       ├── linux.rs               # Linux (X11)
+│   │       ├── windows.rs             # Windows (Win32)
+│   │       └── macos.rs               # macOS (Quartz)
+│   └── tests/                         # 集成测试
+│
 └── phase3_tauri_gui/                  # Phase 3: Tauri GUI ✅
     ├── src/                           # React 前端
     ├── src-tauri/                     # Rust 后端
     └── package.json
 ```
-
-> **Note**: Phase 2 (输入捕获层) 正在开发中
 
 ---
 
@@ -230,12 +239,14 @@ npx eslint src/
 - [x] 平台抽象层
 - [x] 单元测试
 
-### Phase 2: 输入捕获层 🚧
-- [ ] Linux X11 输入捕获
-- [ ] Windows 全局钩子
-- [ ] macOS CGEventTap
-- [ ] 剪贴板同步
-- [ ] 文件拖放
+### Phase 2: 输入捕获层 ✅
+- [x] Linux X11 输入捕获 (467 行)
+- [x] Windows 全局钩子 (336 行)
+- [x] macOS CGEventTap (308 行)
+- [x] 剪贴板同步
+- [x] 平台抽象层
+- [x] 集成测试框架
+- [x] 文档和示例
 
 ### Phase 3: Tauri GUI ✅
 - [x] 基础界面

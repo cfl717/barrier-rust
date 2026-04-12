@@ -1,0 +1,41 @@
+[package]
+name = "barrier-input-capture"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform input capture and injection for Barrier"
+license = "GPL-2.0"
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["all-extensions"] }
+nix = { version = "0.29", features = ["event"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_Graphics_Gdi",
+]}
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-graphics = "0.24"
+objc = "0.2"
+
+[dev-dependencies]
+env_logger = "0.11"
+tokio = { version = "1", features = ["full"] }
+
+[features]
+default = []
+test-mock = []
