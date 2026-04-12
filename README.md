@@ -25,10 +25,10 @@
 ```
 /workspace/
 ├── README.md                          # 本文件
-├── PROJECT_STRUCTURE.md               # 详细项目结构文档
-├── GUI_ALTERNATIVES_EVALUATION.md     # GUI 方案评估报告
-├── BARRIER_RUST_REWRITE_COMPLETE.md   # 完整重构实施报告
-├── PHASE2_INTEGRATION_TESTING.md      # Phase 2 测试与优化指南
+├── docs/PROJECT_STRUCTURE.md               # 详细项目结构文档
+├── docs/GUI_ALTERNATIVES_EVALUATION.md     # GUI 方案评估报告
+├── docs/BARRIER_RUST_REWRITE_COMPLETE.md   # 完整重构实施报告
+├── docs/PHASE2_INTEGRATION_TESTING.md      # Phase 2 测试与优化指南
 │
 ├── protocol/          # Phase 1: 协议层 ✅
 │   ├── Cargo.toml
