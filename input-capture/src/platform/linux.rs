@@ -6,8 +6,39 @@ use super::{PlatformError, PlatformInput};
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Display server type detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayServer {
+    X11,
+    Wayland,
+    Unknown,
+}
+
+impl DisplayServer {
+    /// Detect the current display server at runtime
+    pub fn detect() -> Self {
+        // Check for Wayland first (higher priority)
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            log::info!("Detected Wayland display server");
+            return DisplayServer::Wayland;
+        }
+        
+        // Fallback to X11
+        if std::env::var("DISPLAY").is_ok() {
+            log::info!("Detected X11 display server");
+            return DisplayServer::X11;
+        }
+        
+        log::warn!("No display server detected");
+        DisplayServer::Unknown
+    }
+}
+
 /// Linux input handler
 pub struct LinuxInput {
+    // Display server type (detected at runtime)
+    display_server: DisplayServer,
+    
     // X11 display connection
     #[cfg(feature = "x11")]
     display: *mut std::os::raw::c_void,
@@ -30,7 +61,10 @@ const BUTTON_MIDDLE: u32 = 2;
 impl LinuxInput {
     /// Create a new Linux input handler
     pub fn new() -> Result<Self, PlatformError> {
+        let display_server = DisplayServer::detect();
+        
         Ok(Self {
+            display_server,
             #[cfg(feature = "x11")]
             display: std::ptr::null_mut(),
             #[cfg(feature = "wayland")]
@@ -39,6 +73,258 @@ impl LinuxInput {
             keyboard_grabbed: AtomicBool::new(false),
             mouse_grabbed: AtomicBool::new(false),
         })
+    }
+    
+    /// Check if running under Wayland
+    #[cfg(feature = "wayland")]
+    fn is_wayland(&self) -> bool {
+        self.display_server == DisplayServer::Wayland
+    }
+    
+    /// Check if running under X11
+    #[cfg(feature = "x11")]
+    fn is_x11(&self) -> bool {
+        self.display_server == DisplayServer::X11
+    }
+    
+    // ==================== X11 Implementation Methods ====================
+    
+    /// X11 keyboard capture implementation
+    #[cfg(feature = "x11")]
+    fn capture_keyboard_x11(&self) -> Result<(), PlatformError> {
+        use x11rb::protocol::xproto::*;
+        use x11rb::connection::Connection;
+        use x11rb::errors::ConnectionError;
+        
+        // Open X11 connection
+        let (conn, screen_num) = x11rb::connect(None)
+            .map_err(|e| PlatformError::DisplayError(format!("Failed to connect to X11: {}", e)))?;
+        
+        let root_window = conn.setup().roots[screen_num].root;
+        
+        // Try to grab keyboard
+        let result = conn.grab_keyboard(
+            false, // owner_events
+            root_window,
+            x11rb::CURRENT_TIME,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+        );
+        
+        match result {
+            Ok(reply) => {
+                if reply.status() == GrabStatus::SUCCESS {
+                    log::info!("X11 keyboard grabbed successfully");
+                    Ok(())
+                } else {
+                    Err(PlatformError::PermissionDenied(
+                        format!("Failed to grab keyboard: {:?}", reply.status())
+                    ))
+                }
+            }
+            Err(e) => Err(PlatformError::DisplayError(
+                format!("X11 keyboard grab error: {}", e)
+            )),
+        }
+    }
+    
+    /// X11 keyboard injection implementation
+    #[cfg(feature = "x11")]
+    fn inject_keyboard_x11(&self, key_code: u16, pressed: bool) -> Result<(), PlatformError> {
+        use x11rb::protocol::xtest::*;
+        use x11rb::connection::Connection;
+        
+        let (conn, _) = x11rb::connect(None)
+            .map_err(|e| PlatformError::DisplayError(format!("Failed to connect to X11: {}", e)))?;
+        
+        // Use XTest extension to simulate key event
+        conn.fake_key_input(
+            pressed,
+            key_code as _,
+            0, // time offset
+            0, // device id
+        )
+        .map_err(|e| PlatformError::DisplayError(format!("X11 key injection failed: {}", e)))?;
+        
+        conn.flush()
+            .map_err(|e| PlatformError::DisplayError(format!("X11 flush failed: {}", e)))?;
+        
+        log::debug!("X11 key {} {}", key_code, if pressed { "pressed" } else { "released" });
+        Ok(())
+    }
+    
+    /// X11 mouse capture implementation
+    #[cfg(feature = "x11")]
+    fn capture_mouse_x11(&self) -> Result<(), PlatformError> {
+        use x11rb::protocol::xproto::*;
+        use x11rb::connection::Connection;
+        
+        let (conn, screen_num) = x11rb::connect(None)
+            .map_err(|e| PlatformError::DisplayError(format!("Failed to connect to X11: {}", e)))?;
+        
+        let root_window = conn.setup().roots[screen_num].root;
+        
+        // Grab pointer
+        let result = conn.grab_pointer(
+            false, // owner_events
+            root_window,
+            EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE | EventMask::POINTER_MOTION,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+            0, // confine_to
+            0, // cursor
+            x11rb::CURRENT_TIME,
+        );
+        
+        match result {
+            Ok(reply) => {
+                if reply.status() == GrabStatus::SUCCESS {
+                    log::info!("X11 mouse grabbed successfully");
+                    Ok(())
+                } else {
+                    Err(PlatformError::PermissionDenied(
+                        format!("Failed to grab mouse: {:?}", reply.status())
+                    ))
+                }
+            }
+            Err(e) => Err(PlatformError::DisplayError(
+                format!("X11 mouse grab error: {}", e)
+            )),
+        }
+    }
+    
+    /// X11 mouse movement injection implementation
+    #[cfg(feature = "x11")]
+    fn inject_mouse_move_x11(&self, dx: i16, dy: i16) -> Result<(), PlatformError> {
+        use x11rb::protocol::xtest::*;
+        use x11rb::connection::Connection;
+        
+        let (conn, _) = x11rb::connect(None)
+            .map_err(|e| PlatformError::DisplayError(format!("Failed to connect to X11: {}", e)))?;
+        
+        conn.fake_relative_motion_input(
+            dx as _,
+            dy as _,
+            0, // time offset
+            0, // device id
+        )
+        .map_err(|e| PlatformError::DisplayError(format!("X11 mouse move failed: {}", e)))?;
+        
+        conn.flush()
+            .map_err(|e| PlatformError::DisplayError(format!("X11 flush failed: {}", e)))?;
+        
+        log::debug!("X11 mouse moved by ({}, {})", dx, dy);
+        Ok(())
+    }
+    
+    /// X11 mouse button injection implementation
+    #[cfg(feature = "x11")]
+    fn inject_mouse_button_x11(&self, button: u8, pressed: bool) -> Result<(), PlatformError> {
+        use x11rb::protocol::xtest::*;
+        use x11rb::connection::Connection;
+        
+        // Map Barrier button codes to X11 button numbers
+        let x11_button = match button {
+            1 => 1, // Left
+            2 => 3, // Right
+            3 => 2, // Middle
+            b => {
+                log::warn!("Unknown button code: {}, defaulting to left", b);
+                1
+            }
+        };
+        
+        let (conn, _) = x11rb::connect(None)
+            .map_err(|e| PlatformError::DisplayError(format!("Failed to connect to X11: {}", e)))?;
+        
+        conn.fake_button_input(
+            pressed,
+            x11_button,
+            0, // time offset
+            0, // device id
+        )
+        .map_err(|e| PlatformError::DisplayError(format!("X11 button injection failed: {}", e)))?;
+        
+        conn.flush()
+            .map_err(|e| PlatformError::DisplayError(format!("X11 flush failed: {}", e)))?;
+        
+        log::debug!("X11 mouse button {} {}", button, if pressed { "pressed" } else { "released" });
+        Ok(())
+    }
+    
+    // ==================== Wayland Fallback Methods (Phase 1) ====================
+    
+    /// Wayland keyboard capture fallback (Phase 1: uses X11 compatibility)
+    #[cfg(feature = "wayland")]
+    fn capture_keyboard_x11_fallback(&self) -> Result<(), PlatformError> {
+        #[cfg(feature = "x11")]
+        {
+            log::info!("Wayland falling back to X11 for keyboard capture");
+            return self.capture_keyboard_x11();
+        }
+        
+        #[cfg(not(feature = "x11"))]
+        {
+            log::warn!("Wayland without X11 fallback - using external tools");
+            // Note: Full Wayland native support will be implemented in Phase 2
+            Err(PlatformError::NotSupported)
+        }
+    }
+    
+    /// Wayland keyboard injection fallback (Phase 1)
+    #[cfg(feature = "wayland")]
+    fn inject_keyboard_x11_fallback(&self, key_code: u16, pressed: bool) -> Result<(), PlatformError> {
+        #[cfg(feature = "x11")]
+        {
+            return self.inject_keyboard_x11(key_code, pressed);
+        }
+        
+        #[cfg(not(feature = "x11"))]
+        {
+            Err(PlatformError::NotSupported)
+        }
+    }
+    
+    /// Wayland mouse capture fallback (Phase 1)
+    #[cfg(feature = "wayland")]
+    fn capture_mouse_x11_fallback(&self) -> Result<(), PlatformError> {
+        #[cfg(feature = "x11")]
+        {
+            return self.capture_mouse_x11();
+        }
+        
+        #[cfg(not(feature = "x11"))]
+        {
+            Err(PlatformError::NotSupported)
+        }
+    }
+    
+    /// Wayland mouse movement injection fallback (Phase 1)
+    #[cfg(feature = "wayland")]
+    fn inject_mouse_move_x11_fallback(&self, dx: i16, dy: i16) -> Result<(), PlatformError> {
+        #[cfg(feature = "x11")]
+        {
+            return self.inject_mouse_move_x11(dx, dy);
+        }
+        
+        #[cfg(not(feature = "x11"))]
+        {
+            Err(PlatformError::NotSupported)
+        }
+    }
+    
+    /// Wayland mouse button injection fallback (Phase 1)
+    #[cfg(feature = "wayland")]
+    fn inject_mouse_button_x11_fallback(&self, button: u8, pressed: bool) -> Result<(), PlatformError> {
+        #[cfg(feature = "x11")]
+        {
+            return self.inject_mouse_button_x11(button, pressed);
+        }
+        
+        #[cfg(not(feature = "x11"))]
+        {
+            Err(PlatformError::NotSupported)
+        }
     }
     
     /// Open X11 display connection
@@ -85,273 +371,108 @@ impl PlatformInput for LinuxInput {
     }
 
     fn capture_keyboard(&self) -> Result<(), PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xlib::*;
-            use std::ptr;
-            
-            // Note: This requires running with appropriate permissions
-            // In practice, you may need to use evdev or run as root
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for keyboard grab".to_string()
-                    ));
-                }
-                
-                let root_window = XDefaultRootWindow(display);
-                
-                // Try to grab keyboard
-                let result = XGrabKeyboard(
-                    display,
-                    root_window,
-                    False as _,
-                    GrabModeAsync,
-                    GrabModeAsync,
-                    CurrentTime,
-                );
-                
-                XCloseDisplay(display);
-                
-                if result == GrabSuccess as i32 {
-                    log::info!("Keyboard grabbed successfully");
-                    return Ok(());
-                } else {
-                    return Err(PlatformError::PermissionDenied(
-                        format!("Failed to grab keyboard: {}", result)
-                    ));
-                }
-            }
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::warn!("Wayland keyboard capture not yet implemented (Phase 1)");
+            log::info!("Falling back to external tools or X11 compatibility layer");
+            // Phase 1: Use existing X11 fallback or external tools
+            // Full Wayland native support will be implemented in Phase 2
+            return self.capture_keyboard_x11_fallback();
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            // Fallback: try evdev (requires root)
-            log::warn!("X11 feature not enabled, keyboard capture requires evdev access");
-            return Err(PlatformError::PermissionDenied(
-                "Keyboard capture requires X11 or root access to /dev/input/event*".to_string()
-            ));
+        #[cfg(feature = "x11")]
+        if self.is_x11() {
+            return self.capture_keyboard_x11();
         }
+        
+        Err(PlatformError::NotSupported)
     }
 
     fn inject_keyboard(&self, key_code: u16, pressed: bool) -> Result<(), PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xtest::*;
-            use x11::xlib::*;
-            use std::ptr;
-            
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for key injection".to_string()
-                    ));
-                }
-                
-                // Use XTest to simulate key press/release
-                let keycode = key_code as _;
-                XTestFakeKeyEvent(display, keycode, pressed as _, CurrentTime);
-                XFlush(display);
-                XCloseDisplay(display);
-                
-                log::debug!("Key {} {}", key_code, if pressed { "pressed" } else { "released" });
-                return Ok(());
-            }
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::warn!("Wayland keyboard injection not yet implemented (Phase 1)");
+            // Phase 1: Fallback to X11 compatibility or external tools
+            return self.inject_keyboard_x11_fallback(key_code, pressed);
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            log::error!("X11 not available for keyboard injection");
-            Err(PlatformError::NotSupported)
+        #[cfg(feature = "x11")]
+        if self.is_x11() {
+            return self.inject_keyboard_x11(key_code, pressed);
         }
+        
+        Err(PlatformError::NotSupported)
     }
 
     fn capture_mouse(&self) -> Result<(), PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xlib::*;
-            use std::ptr;
-            
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for mouse grab".to_string()
-                    ));
-                }
-                
-                let root_window = XDefaultRootWindow(display);
-                
-                // Grab mouse pointer
-                let result = XGrabPointer(
-                    display,
-                    root_window,
-                    False as _,
-                    ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-                    GrabModeAsync,
-                    GrabModeAsync,
-                    0,
-                    0,
-                    CurrentTime,
-                );
-                
-                XCloseDisplay(display);
-                
-                if result == GrabSuccess as i32 {
-                    log::info!("Mouse grabbed successfully");
-                    return Ok(());
-                } else {
-                    return Err(PlatformError::PermissionDenied(
-                        format!("Failed to grab mouse: {}", result)
-                    ));
-                }
-            }
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::warn!("Wayland mouse capture not yet implemented (Phase 1)");
+            // Phase 1: Fallback
+            return self.capture_mouse_x11_fallback();
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            log::warn!("X11 not available for mouse capture");
-            Err(PlatformError::NotSupported)
+        #[cfg(feature = "x11")]
+        if self.is_x11() {
+            return self.capture_mouse_x11();
         }
+        
+        Err(PlatformError::NotSupported)
     }
 
     fn inject_mouse_move(&self, dx: i16, dy: i16) -> Result<(), PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xtest::*;
-            use x11::xlib::*;
-            use std::ptr;
-            
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for mouse movement".to_string()
-                    ));
-                }
-                
-                // Use XTest to simulate relative mouse movement
-                XTestFakeRelativeMotionEvent(display, dx as _, dy as _, 0, CurrentTime);
-                XFlush(display);
-                XCloseDisplay(display);
-                
-                log::debug!("Mouse moved by ({}, {})", dx, dy);
-                return Ok(());
-            }
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::warn!("Wayland mouse movement injection not yet implemented (Phase 1)");
+            return self.inject_mouse_move_x11_fallback(dx, dy);
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            log::error!("X11 not available for mouse movement injection");
-            Err(PlatformError::NotSupported)
+        #[cfg(feature = "x11")]
+        if self.is_x11() {
+            return self.inject_mouse_move_x11(dx, dy);
         }
+        
+        Err(PlatformError::NotSupported)
     }
 
     fn inject_mouse_button(&self, button: u8, pressed: bool) -> Result<(), PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xtest::*;
-            use x11::xlib::*;
-            use std::ptr;
-            
-            // Map Barrier button codes to X11 button numbers
-            let x11_button = match button {
-                1 => BUTTON_LEFT,
-                2 => BUTTON_RIGHT,
-                3 => BUTTON_MIDDLE,
-                b => {
-                    log::warn!("Unknown button code: {}", b);
-                    BUTTON_LEFT // Default to left button
-                }
-            };
-            
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for mouse button".to_string()
-                    ));
-                }
-                
-                XTestFakeButtonEvent(display, x11_button, pressed as _, CurrentTime);
-                XFlush(display);
-                XCloseDisplay(display);
-                
-                log::debug!("Mouse button {} {}", button, if pressed { "pressed" } else { "released" });
-                return Ok(());
-            }
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::warn!("Wayland mouse button injection not yet implemented (Phase 1)");
+            return self.inject_mouse_button_x11_fallback(button, pressed);
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            log::error!("X11 not available for mouse button injection");
-            Err(PlatformError::NotSupported)
+        #[cfg(feature = "x11")]
+        if self.is_x11() {
+            return self.inject_mouse_button_x11(button, pressed);
         }
+        
+        Err(PlatformError::NotSupported)
     }
 
     fn get_clipboard(&self) -> Result<String, PlatformError> {
-        #[cfg(feature = "x11")]
-        {
-            use x11::xlib::*;
-            use std::ptr;
-            use std::slice;
-            
-            unsafe {
-                let display = XOpenDisplay(ptr::null());
-                if display.is_null() {
-                    return Err(PlatformError::DisplayError(
-                        "Cannot open X display for clipboard".to_string()
-                    ));
-                }
-                
-                let window = XDefaultRootWindow(display);
-                
-                // Get CLIPBOARD selection
-                let clipboard_atom = XInternAtom(display, CString::new("CLIPBOARD")?.as_ptr(), False as _);
-                let utf8_atom = XInternAtom(display, CString::new("UTF8_STRING")?.as_ptr(), False as _);
-                
-                // Convert selection to property
-                XConvertSelection(display, clipboard_atom, utf8_atom, clipboard_atom, window, CurrentTime);
-                XFlush(display);
-                
-                // Wait for SelectionNotify event (simplified - in production use proper event loop)
-                // For now, we'll use a simpler approach with xclip/wl-clipboard
-                
-                XCloseDisplay(display);
-            }
-            
-            // Fallback: try using xclip command
-            use std::process::Command;
-            let output = Command::new("xclip")
-                .args(["-selection", "clipboard", "-o"])
-                .output();
-            
-            match output {
-                Ok(out) => {
-                    if out.status.success() {
-                        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
-                    }
-                }
-                Err(_) => {
-                    // Try wl-clipboard for Wayland
-                    if let Ok(out) = Command::new("wl-paste").output() {
-                        if out.status.success() {
-                            return Ok(String::from_utf8_lossy(&out.stdout).to_string());
-                        }
-                    }
+        use std::process::Command;
+        
+        // Try Wayland first if detected
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::debug!("Using wl-paste for Wayland clipboard");
+            if let Ok(out) = Command::new("wl-paste").output() {
+                if out.status.success() {
+                    return Ok(String::from_utf8_lossy(&out.stdout).to_string());
                 }
             }
-            
-            Err(PlatformError::NotSupported)
+            // Fallback to X11 if wl-paste fails
+            #[cfg(feature = "x11")]
+            {
+                log::debug!("wl-paste failed, trying xclip");
+            }
         }
         
-        #[cfg(not(feature = "x11"))]
+        // Try X11 clipboard tools
+        #[cfg(feature = "x11")]
         {
-            // Try command-line tools
-            use std::process::Command;
-            
+            log::debug!("Using xclip for X11 clipboard");
             if let Ok(out) = Command::new("xclip")
                 .args(["-selection", "clipboard", "-o"])
                 .output()
@@ -360,23 +481,42 @@ impl PlatformInput for LinuxInput {
                     return Ok(String::from_utf8_lossy(&out.stdout).to_string());
                 }
             }
-            
-            if let Ok(out) = Command::new("wl-paste").output() {
-                if out.status.success() {
-                    return Ok(String::from_utf8_lossy(&out.stdout).to_string());
-                }
-            }
-            
-            Err(PlatformError::NotSupported)
         }
+        
+        // If all methods fail
+        Err(PlatformError::NotSupported)
     }
 
     fn set_clipboard(&self, content: &str) -> Result<(), PlatformError> {
+        use std::process::Command;
+        use std::io::Write;
+        
+        // Try Wayland first if detected
+        #[cfg(feature = "wayland")]
+        if self.is_wayland() {
+            log::debug!("Using wl-copy for Wayland clipboard");
+            let mut child = Command::new("wl-copy")
+                .stdin(std::process::Stdio::piped())
+                .spawn();
+            
+            if let Ok(mut child) = child {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+                let _ = child.wait();
+                return Ok(());
+            }
+            // Fallback to X11 if wl-copy fails
+            #[cfg(feature = "x11")]
+            {
+                log::debug!("wl-copy failed, trying xclip");
+            }
+        }
+        
+        // Try X11 clipboard tools
         #[cfg(feature = "x11")]
         {
-            use std::process::Command;
-            
-            // Try xclip first
+            log::debug!("Using xclip for X11 clipboard");
             let mut child = Command::new("xclip")
                 .args(["-selection", "clipboard", "-i"])
                 .stdin(std::process::Stdio::piped())
@@ -384,63 +524,14 @@ impl PlatformInput for LinuxInput {
             
             if let Ok(mut child) = child {
                 if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
                     let _ = stdin.write_all(content.as_bytes());
                 }
                 let _ = child.wait();
                 return Ok(());
             }
-            
-            // Try wl-clipboard for Wayland
-            let mut child = Command::new("wl-copy")
-                .stdin(std::process::Stdio::piped())
-                .spawn();
-            
-            if let Ok(mut child) = child {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(content.as_bytes());
-                }
-                let _ = child.wait();
-                return Ok(());
-            }
-            
-            Err(PlatformError::NotSupported)
         }
         
-        #[cfg(not(feature = "x11"))]
-        {
-            use std::process::Command;
-            
-            // Try xclip
-            if let Ok(mut child) = Command::new("xclip")
-                .args(["-selection", "clipboard", "-i"])
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(content.as_bytes());
-                }
-                let _ = child.wait();
-                return Ok(());
-            }
-            
-            // Try wl-copy
-            if let Ok(mut child) = Command::new("wl-copy")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(content.as_bytes());
-                }
-                let _ = child.wait();
-                return Ok(());
-            }
-            
-            Err(PlatformError::NotSupported)
-        }
+        Err(PlatformError::NotSupported)
     }
 
     fn shutdown(&self) -> Result<(), PlatformError> {
