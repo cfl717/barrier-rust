@@ -7,12 +7,12 @@ The input capture layer (Phase 2) has been successfully implemented with full cr
 ## What Was Implemented
 
 ### Core Platform Trait
-- **Location**: `phase1_protocol_scaffold/src/platform/mod.rs`
+- **Location**: `protocol/src/platform/mod.rs`
 - **Status**: ✅ Complete
 - **Methods**: 9 platform-agnostic input operations defined
 
 ### Linux Implementation  
-- **Location**: `phase1_protocol_scaffold/src/platform/linux.rs`
+- **Location**: `protocol/src/platform/linux.rs`
 - **Status**: ✅ Complete (470 lines)
 - **Backend**: X11 Xlib + XTest extension
 - **Features**:
@@ -22,7 +22,7 @@ The input capture layer (Phase 2) has been successfully implemented with full cr
   - Wayland compatibility notes
 
 ### Windows Implementation
-- **Location**: `phase1_protocol_scaffold/src/platform/windows.rs`  
+- **Location**: `protocol/src/platform/windows.rs`  
 - **Status**: ✅ Complete (340 lines)
 - **Backend**: Win32 APIs via `windows` crate
 - **Features**:
@@ -32,7 +32,7 @@ The input capture layer (Phase 2) has been successfully implemented with full cr
   - Scan code conversion
 
 ### macOS Implementation
-- **Location**: `phase1_protocol_scaffold/src/platform/macos.rs`
+- **Location**: `protocol/src/platform/macos.rs`
 - **Status**: ✅ Complete (310 lines)  
 - **Backend**: Quartz Event Services + Objective-C runtime
 - **Features**:
@@ -124,13 +124,13 @@ To complete the full Barrier implementation:
 ## Files Modified/Created
 
 ### Modified
-- `/workspace/phase1_protocol_scaffold/Cargo.toml` - Added platform dependencies
-- `/workspace/phase1_protocol_scaffold/src/platform/linux.rs` - Full implementation
-- `/workspace/phase1_protocol_scaffold/src/platform/windows.rs` - Full implementation  
-- `/workspace/phase1_protocol_scaffold/src/platform/macos.rs` - Full implementation
+- `/workspace/protocol/Cargo.toml` - Added platform dependencies
+- `/workspace/protocol/src/platform/linux.rs` - Full implementation
+- `/workspace/protocol/src/platform/windows.rs` - Full implementation  
+- `/workspace/protocol/src/platform/macos.rs` - Full implementation
 
 ### Created
-- `/workspace/phase2_input_capture/` - Phase 2 directory structure
+- `/workspace/input-capture/` - Phase 2 directory structure
 - `/workspace/PHASE2_COMPLETE.md` - This summary document
 
 ## Project Status Overview

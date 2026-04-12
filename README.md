@@ -30,7 +30,7 @@
 ├── BARRIER_RUST_REWRITE_COMPLETE.md   # 完整重构实施报告
 ├── PHASE2_INTEGRATION_TESTING.md      # Phase 2 测试与优化指南
 │
-├── phase1_protocol_scaffold/          # Phase 1: 协议层 ✅
+├── protocol/          # Phase 1: 协议层 ✅
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── protocol/                  # Barrier 协议实现
@@ -38,7 +38,7 @@
 │   │   └── platform/                  # 平台抽象层
 │   └── examples/                      # 可运行示例
 │
-├── phase2_input_capture/              # Phase 2: 输入捕获层 ✅
+├── input-capture/              # Phase 2: 输入捕获层 ✅
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── lib.rs                     # 公共 API
@@ -48,7 +48,7 @@
 │   │       └── macos.rs               # macOS (Quartz)
 │   └── tests/                         # 集成测试
 │
-└── phase3_tauri_gui/                  # Phase 3: Tauri GUI ✅
+└── tauri-gui/                  # Phase 3: Tauri GUI ✅
     ├── src/                           # React 前端
     ├── src-tauri/                     # Rust 后端
     └── package.json
@@ -96,7 +96,7 @@ cd barrier-rust
 适合开发和测试协议功能：
 
 ```bash
-cd phase1_protocol_scaffold
+cd protocol
 
 # 编译
 cargo build --release
@@ -117,7 +117,7 @@ cargo test
 ### 方式 2: 完整 GUI 应用
 
 ```bash
-cd phase3_tauri_gui
+cd tauri-gui
 
 # 安装前端依赖
 npm install
@@ -160,7 +160,7 @@ npm run tauri build
 
 ### 代码结构
 
-#### 协议层 (`phase1_protocol_scaffold/src/`)
+#### 协议层 (`protocol/src/`)
 
 | 模块 | 描述 | 代码行数 |
 |------|------|----------|
@@ -174,7 +174,7 @@ npm run tauri build
 | `platform/windows.rs` | Windows 平台实现 | 68 |
 | `platform/macos.rs` | macOS 平台实现 | 68 |
 
-#### GUI 层 (`phase3_tauri_gui/`)
+#### GUI 层 (`tauri-gui/`)
 
 | 组件 | 技术 | 描述 |
 |------|------|------|
@@ -184,10 +184,10 @@ npm run tauri build
 
 ### 添加新功能
 
-1. **协议扩展**: 在 `phase1_protocol_scaffold/src/protocol/` 中添加新消息类型
-2. **平台实现**: 在 `phase1_protocol_scaffold/src/platform/` 中实现平台特定功能
-3. **GUI 更新**: 在 `phase3_tauri_gui/src/` 中更新 React 组件
-4. **IPC 命令**: 在 `phase3_tauri_gui/src-tauri/src/main.rs` 中添加新命令
+1. **协议扩展**: 在 `protocol/src/protocol/` 中添加新消息类型
+2. **平台实现**: 在 `protocol/src/platform/` 中实现平台特定功能
+3. **GUI 更新**: 在 `tauri-gui/src/` 中更新 React 组件
+4. **IPC 命令**: 在 `tauri-gui/src-tauri/src/main.rs` 中添加新命令
 
 ### 代码规范
 
@@ -199,7 +199,7 @@ cargo fmt
 cargo clippy
 
 # TypeScript 检查
-cd phase3_tauri_gui
+cd tauri-gui
 npx tsc --noEmit
 npx eslint src/
 ```

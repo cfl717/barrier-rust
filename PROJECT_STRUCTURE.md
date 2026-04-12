@@ -8,7 +8,7 @@
 ├── .cargo/                              # Cargo 配置
 ├── .git/                                # Git 仓库
 │
-├── phase1_protocol_scaffold/            # Phase 1: 协议层脚手架 ✅
+├── protocol/            # Phase 1: 协议层脚手架 ✅
 │   ├── Cargo.toml                       # 依赖配置
 │   ├── README.md                        # 模块文档
 │   ├── IMPLEMENTATION_ROADMAP.md        # 实施路线图
@@ -35,7 +35,7 @@
 │       ├── client.rs                    # 客户端示例 (32 行)
 │       └── message_demo.rs              # 消息演示 (76 行)
 │
-└── phase3_tauri_gui/                    # Phase 3: Tauri GUI ✅
+└── tauri-gui/                    # Phase 3: Tauri GUI ✅
     ├── README.md                        # GUI 文档
     ├── package.json                     # Node 依赖
     ├── tsconfig.json                    # TypeScript 配置
@@ -102,7 +102,7 @@
 
 ### Phase 1 (协议层)
 ```bash
-cd phase1_protocol_scaffold
+cd protocol
 cargo build
 cargo test
 cargo run --example server
@@ -111,7 +111,7 @@ cargo run --example client
 
 ### Phase 3 (GUI)
 ```bash
-cd phase3_tauri_gui
+cd tauri-gui
 npm install
 npm run tauri dev      # 开发模式
 npm run tauri build    # 生产构建

@@ -3,7 +3,7 @@
 ## 📦 项目结构
 
 ```
-phase2_input_capture/
+input-capture/
 ├── Cargo.toml              # 项目配置和依赖
 ├── src/
 │   ├── lib.rs              # 主库入口和公共 API
@@ -24,7 +24,7 @@ phase2_input_capture/
 sudo apt-get install libx11-dev libxi-dev libxtest-dev libxtst-dev
 
 # 构建
-cd phase2_input_capture
+cd input-capture
 cargo build --release
 ```
 
@@ -195,7 +195,7 @@ impl BarrierServer {
 在 Tauri 命令中调用输入捕获：
 
 ```rust
-// phase3_tauri_gui/src-tauri/src/main.rs
+// tauri-gui/src-tauri/src/main.rs
 use barrier_input_capture::InputCapture;
 
 #[tauri::command]

@@ -43,7 +43,7 @@ Phase 2 (输入捕获层) 已全部完成，总计 **1,466 行代码**，包含�
 ## 📦 项目结构
 
 ```
-phase2_input_capture/
+input-capture/
 ├── Cargo.toml              # 项目配置
 │   - thiserror (错误处理)
 │   - log (日志)

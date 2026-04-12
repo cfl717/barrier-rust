@@ -14,7 +14,7 @@
 
 ## 🏗️ Phase 1: 协议层脚手架 (已完成)
 
-**位置**: `/workspace/phase1_protocol_scaffold`
+**位置**: `/workspace/protocol`
 
 ### 核心成果
 | 模块 | 文件数 | 代码行数 | 功能描述 |
@@ -81,7 +81,7 @@ phase2_input_clipboard/
 
 ## 🎨 Phase 3: Tauri GUI 集成 (已完成)
 
-**位置**: `/workspace/phase3_tauri_gui`
+**位置**: `/workspace/tauri-gui`
 
 ### 技术栈
 - **前端**: React 18 + TypeScript + Vite
@@ -91,7 +91,7 @@ phase2_input_clipboard/
 
 ### 项目结构
 ```
-phase3_tauri_gui/
+tauri-gui/
 ├── src/                    # React 前端
 │   ├── App.tsx            # 主应用组件 (167 行)
 │   ├── main.tsx           # 入口文件
@@ -272,7 +272,7 @@ sudo apt install libwebkit2gtk-4.0-dev build-essential \
     librsvg2-dev
 
 # 运行开发版本
-cd phase3_tauri_gui
+cd tauri-gui
 npm install
 npm run tauri dev
 
@@ -285,7 +285,7 @@ npm run tauri build
 # 安装 WebView2
 # 安装 Visual Studio C++ 工具
 
-cd phase3_tauri_gui
+cd tauri-gui
 npm install
 npm run tauri dev
 ```
@@ -295,7 +295,7 @@ npm run tauri dev
 # 安装 Xcode 命令行工具
 xcode-select --install
 
-cd phase3_tauri_gui
+cd tauri-gui
 npm install
 npm run tauri dev
 ```

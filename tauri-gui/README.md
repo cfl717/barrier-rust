@@ -5,7 +5,7 @@ This phase implements the modern web-based GUI for Barrier using Tauri (Rust bac
 
 ## Project Structure
 ```
-phase3_tauri_gui/
+tauri-gui/
 ├── src/                    # React frontend source
 │   ├── components/         # Reusable UI components
 │   ├── pages/              # Page components
