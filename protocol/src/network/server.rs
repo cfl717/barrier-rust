@@ -4,7 +4,7 @@
 
 use crate::protocol::{server_handshake, HandshakeResult, Message, ProtocolResult};
 use crate::network::Connection;
-use crate::protocol::events::ClientEnterEvent;
+use crate::protocol::events::{ClientEnterEvent, KeyEvent, ModifierKeys, MouseButton, MouseButtonEvent, MouseMoveEvent};
 use crate::protocol::message::message_types;
 use log::{error, info, warn};
 use std::collections::HashMap;
@@ -175,41 +175,88 @@ impl BarrierServer {
         self.clients.lock().await.len()
     }
 
-    /// Switch input focus to a specific client by screen name.
-    pub async fn switch_to_client(&self, screen_name: &str) -> Result<(), String> {
-        let writer = {
-            let clients = self.clients.lock().await;
-            clients
-                .get(screen_name)
-                .map(|session| Arc::clone(&session.writer))
-                .ok_or_else(|| format!("客户端 `{}` 未连接", screen_name))?
-        };
-
-        let leave_msg = Message::empty(message_types::CLIENT_LEAVE);
-        let enter_msg = ClientEnterEvent::new(1, 0, 0, 0).to_message();
-
-        let leave_bytes = leave_msg
-            .serialize()
-            .map_err(|e| format!("序列化 COUT 失败: {}", e))?;
+    /// Send CLIENT_ENTER to one client.
+    pub async fn send_enter(&self, screen_name: &str, x: i16, y: i16) -> Result<(), String> {
+        let writer = self.get_client_writer(screen_name).await?;
+        let enter_msg = ClientEnterEvent::new(1, x, y, 0).to_message();
         let enter_bytes = enter_msg
             .serialize()
             .map_err(|e| format!("序列化 CINN 失败: {}", e))?;
+        send_serialized_messages(&writer, &[enter_bytes]).await
+    }
 
-        let mut writer = writer.lock().await;
-        writer
-            .write_all(&leave_bytes)
-            .await
-            .map_err(|e| format!("发送 COUT 失败: {}", e))?;
-        writer
-            .write_all(&enter_bytes)
-            .await
-            .map_err(|e| format!("发送 CINN 失败: {}", e))?;
-        writer
-            .flush()
-            .await
-            .map_err(|e| format!("刷新切换消息失败: {}", e))?;
+    /// Send CLIENT_LEAVE to one client.
+    pub async fn send_leave(&self, screen_name: &str) -> Result<(), String> {
+        let writer = self.get_client_writer(screen_name).await?;
+        let leave_msg = Message::empty(message_types::CLIENT_LEAVE);
+        let leave_bytes = leave_msg
+            .serialize()
+            .map_err(|e| format!("序列化 COUT 失败: {}", e))?;
+        send_serialized_messages(&writer, &[leave_bytes]).await
+    }
 
-        Ok(())
+    pub async fn relay_mouse_move(
+        &self,
+        screen_name: &str,
+        dx: i16,
+        dy: i16,
+    ) -> Result<(), String> {
+        let writer = self.get_client_writer(screen_name).await?;
+        let msg = MouseMoveEvent::new(dx, dy, ModifierKeys::NONE).to_message();
+        let bytes = msg
+            .serialize()
+            .map_err(|e| format!("序列化 CMOV 失败: {}", e))?;
+        send_serialized_messages(&writer, &[bytes]).await
+    }
+
+    pub async fn relay_key_event(
+        &self,
+        screen_name: &str,
+        key_code: u16,
+        pressed: bool,
+    ) -> Result<(), String> {
+        let writer = self.get_client_writer(screen_name).await?;
+        let event = KeyEvent::new(key_code, pressed, ModifierKeys::NONE);
+        let msg = if pressed {
+            event.to_key_down_message()
+        } else {
+            event.to_key_up_message()
+        };
+        let bytes = msg
+            .serialize()
+            .map_err(|e| format!("序列化键盘事件失败: {}", e))?;
+        send_serialized_messages(&writer, &[bytes]).await
+    }
+
+    pub async fn relay_mouse_button(
+        &self,
+        screen_name: &str,
+        button: u8,
+        pressed: bool,
+    ) -> Result<(), String> {
+        let writer = self.get_client_writer(screen_name).await?;
+        let mapped_button = match button {
+            1 => MouseButton::Left,
+            2 => MouseButton::Right,
+            3 => MouseButton::Middle,
+            _ => MouseButton::None,
+        };
+        let msg = MouseButtonEvent::new(mapped_button, pressed, ModifierKeys::NONE).to_message();
+        let bytes = msg
+            .serialize()
+            .map_err(|e| format!("序列化鼠标按键事件失败: {}", e))?;
+        send_serialized_messages(&writer, &[bytes]).await
+    }
+
+    async fn get_client_writer(
+        &self,
+        screen_name: &str,
+    ) -> Result<Arc<Mutex<OwnedWriteHalf>>, String> {
+        let clients = self.clients.lock().await;
+        clients
+            .get(screen_name)
+            .map(|session| Arc::clone(&session.writer))
+            .ok_or_else(|| format!("客户端 `{}` 未连接", screen_name))
     }
 }
 
@@ -284,6 +331,24 @@ async fn wait_for_disconnect(read_half: &mut OwnedReadHalf) {
             Err(_) => break,
         }
     }
+}
+
+async fn send_serialized_messages(
+    writer: &Arc<Mutex<OwnedWriteHalf>>,
+    payloads: &[Vec<u8>],
+) -> Result<(), String> {
+    let mut writer = writer.lock().await;
+    for payload in payloads {
+        writer
+            .write_all(payload)
+            .await
+            .map_err(|e| format!("发送消息失败: {}", e))?;
+    }
+    writer
+        .flush()
+        .await
+        .map_err(|e| format!("刷新消息失败: {}", e))?;
+    Ok(())
 }
 
 #[cfg(test)]

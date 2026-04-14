@@ -51,6 +51,6 @@ core-graphics = "0.24"
 tokio-test = "0.4"
 
 [features]
-default = []
+default = ["x11"]
 x11 = []
 wayland = []

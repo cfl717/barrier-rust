@@ -4,7 +4,9 @@
 
 use crate::protocol::{client_handshake, HandshakeResult, Message, ProtocolResult};
 use crate::protocol::message::message_types;
+use crate::protocol::events::{KeyEvent, MouseButtonEvent, MouseMoveEvent};
 use crate::network::Connection;
+use crate::platform::get_platform;
 use log::{error, info, warn};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -225,15 +227,40 @@ impl BarrierClient {
             match self.connect().await {
                 Ok(_) => {
                     info!("Successfully connected to server");
+                    let mut input_enabled = false;
 
                     // Basic message processing loop for screen-switch signals.
                     loop {
                         match self.receive().await {
                             Ok(msg) => {
                                 if msg.msg_type == message_types::CLIENT_ENTER {
+                                    input_enabled = true;
                                     info!("Received CINN: input focus entered this client");
                                 } else if msg.msg_type == message_types::CLIENT_LEAVE {
+                                    input_enabled = false;
                                     info!("Received COUT: input focus left this client");
+                                } else if input_enabled && msg.msg_type == message_types::MOUSE_MOVE {
+                                    if let Ok(event) = MouseMoveEvent::from_message(&msg) {
+                                        if let Err(e) = inject_mouse_move(event.dx, event.dy) {
+                                            warn!("Inject mouse move failed: {}", e);
+                                        }
+                                    }
+                                } else if input_enabled
+                                    && (msg.msg_type == message_types::KEY_DOWN
+                                        || msg.msg_type == message_types::KEY_UP)
+                                {
+                                    if let Ok(event) = KeyEvent::from_message(&msg) {
+                                        if let Err(e) = inject_key(event.key_code, event.pressed) {
+                                            warn!("Inject key event failed: {}", e);
+                                        }
+                                    }
+                                } else if input_enabled && msg.msg_type == message_types::MOUSE_BUTTON {
+                                    if let Ok(event) = MouseButtonEvent::from_message(&msg) {
+                                        let button_code = event.button as u8;
+                                        if let Err(e) = inject_mouse_button(button_code, event.pressed) {
+                                            warn!("Inject mouse button failed: {}", e);
+                                        }
+                                    }
                                 } else {
                                     info!("Received message type: {}", msg.msg_type);
                                 }
@@ -265,6 +292,27 @@ impl BarrierClient {
             }
         }
     }
+}
+
+fn inject_mouse_move(dx: i16, dy: i16) -> Result<(), String> {
+    let platform = get_platform().map_err(|e| format!("平台初始化失败: {}", e))?;
+    platform
+        .inject_mouse_move(dx, dy)
+        .map_err(|e| format!("鼠标移动注入失败: {}", e))
+}
+
+fn inject_key(key_code: u16, pressed: bool) -> Result<(), String> {
+    let platform = get_platform().map_err(|e| format!("平台初始化失败: {}", e))?;
+    platform
+        .inject_keyboard(key_code, pressed)
+        .map_err(|e| format!("键盘注入失败: {}", e))
+}
+
+fn inject_mouse_button(button: u8, pressed: bool) -> Result<(), String> {
+    let platform = get_platform().map_err(|e| format!("平台初始化失败: {}", e))?;
+    platform
+        .inject_mouse_button(button, pressed)
+        .map_err(|e| format!("鼠标按键注入失败: {}", e))
 }
 
 // Re-export ProtocolError for convenience

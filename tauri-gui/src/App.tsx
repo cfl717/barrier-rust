@@ -15,6 +15,8 @@ interface RuntimeCapabilities {
   has_x11_display: boolean
   has_wayland_display: boolean
   input_backend: string
+  /** Linux + X11：后端 rdev 全局转发可用 */
+  global_input_available: boolean
   recommendations: string[]
   blocking_issues: string[]
 }
@@ -43,6 +45,8 @@ function App() {
   const [logs, setLogs] = useState<string[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [activeClient, setActiveClient] = useState<string | null>(null)
+  const [pointerLockEnabled, setPointerLockEnabled] = useState(true)
+  const [pointerLocked, setPointerLocked] = useState(false)
   const lastEdgeSwitchTsRef = useRef(0)
 
   useEffect(() => {
@@ -115,6 +119,9 @@ function App() {
       await invoke('stop_service')
       setIsRunning(false)
       setActiveClient(null)
+      if (document.pointerLockElement) {
+        document.exitPointerLock()
+      }
       setLogs(prev => [...prev, 'Service stopped'])
     } catch (error) {
       setLogs(prev => [...prev, `Error stopping service: ${error}`])
@@ -134,6 +141,19 @@ function App() {
     ])
   }
 
+  const oppositeEdge = (edge: ScreenEdge): ScreenEdge => {
+    switch (edge) {
+      case 'left':
+        return 'right'
+      case 'right':
+        return 'left'
+      case 'top':
+        return 'bottom'
+      case 'bottom':
+        return 'top'
+    }
+  }
+
   const removeClientRoute = (id: string) => {
     setClientRoutes(prev => prev.filter(route => route.id !== id))
   }
@@ -142,6 +162,24 @@ function App() {
     setClientRoutes(prev =>
       prev.map(route => (route.id === id ? { ...route, ...patch } : route))
     )
+  }
+
+  const computeRemoteEntryPoint = (edge: ScreenEdge, event: MouseEvent) => {
+    const width = window.innerWidth
+    const height = window.innerHeight
+    const x = Math.max(0, Math.min(width - 1, event.clientX))
+    const y = Math.max(0, Math.min(height - 1, event.clientY))
+
+    switch (edge) {
+      case 'left':
+        return { cursor_x: width - 1, cursor_y: y }
+      case 'right':
+        return { cursor_x: 0, cursor_y: y }
+      case 'top':
+        return { cursor_x: x, cursor_y: height - 1 }
+      case 'bottom':
+        return { cursor_x: x, cursor_y: 0 }
+    }
   }
 
   useEffect(() => {
@@ -159,6 +197,24 @@ function App() {
 
       if (!edge) return
 
+      if (activeClient) {
+        const activeRoute = clientRoutes.find(route => route.name === activeClient)
+        if (activeRoute && edge === oppositeEdge(activeRoute.edge)) {
+          const now = Date.now()
+          if (now - lastEdgeSwitchTsRef.current < 500) return
+          lastEdgeSwitchTsRef.current = now
+          void invoke<string>('switch_back_local', { edge })
+            .then((message) => {
+              setActiveClient(null)
+              setLogs(prev => [...prev, message])
+            })
+            .catch((error) => {
+              setLogs(prev => [...prev, `Return local failed: ${String(error)}`])
+            })
+          return
+        }
+      }
+
       const matched = clientRoutes.find(route => route.edge === edge)
       if (!matched) return
 
@@ -169,11 +225,13 @@ function App() {
 
       lastEdgeSwitchTsRef.current = now
       setActiveClient(matched.name)
+      const entry = computeRemoteEntryPoint(edge, event)
       void invoke<string>('switch_client', {
         request: {
           edge,
           client_name: matched.name,
           client_address: matched.address || null,
+          ...entry,
         },
       })
         .then((message) => {
@@ -192,6 +250,24 @@ function App() {
       else if (event.clientY >= window.innerHeight) edge = 'bottom'
       if (!edge) return
 
+      if (activeClient) {
+        const activeRoute = clientRoutes.find(route => route.name === activeClient)
+        if (activeRoute && edge === oppositeEdge(activeRoute.edge)) {
+          const now = Date.now()
+          if (now - lastEdgeSwitchTsRef.current < 500) return
+          lastEdgeSwitchTsRef.current = now
+          void invoke<string>('switch_back_local', { edge })
+            .then((message) => {
+              setActiveClient(null)
+              setLogs(prev => [...prev, message])
+            })
+            .catch((error) => {
+              setLogs(prev => [...prev, `Return local failed: ${String(error)}`])
+            })
+          return
+        }
+      }
+
       const matched = clientRoutes.find(route => route.edge === edge)
       if (!matched) return
 
@@ -202,11 +278,13 @@ function App() {
 
       lastEdgeSwitchTsRef.current = now
       setActiveClient(matched.name)
+      const entry = computeRemoteEntryPoint(edge, event)
       void invoke<string>('switch_client', {
         request: {
           edge,
           client_name: matched.name,
           client_address: matched.address || null,
+          ...entry,
         },
       })
         .then((message) => {
@@ -224,6 +302,53 @@ function App() {
       window.removeEventListener('mouseleave', onMouseLeave)
     }
   }, [activeClient, appState?.mode, clientRoutes, isRunning])
+
+  useEffect(() => {
+    const onPointerLockChange = () => {
+      setPointerLocked(document.pointerLockElement != null)
+    }
+    document.addEventListener('pointerlockchange', onPointerLockChange)
+    return () => document.removeEventListener('pointerlockchange', onPointerLockChange)
+  }, [])
+
+  useEffect(() => {
+    const canRelayInput = isRunning && appState?.mode === 'server' && !!activeClient
+    if (!canRelayInput) {
+      return
+    }
+    // Linux+X11 下由后端 rdev 转发键盘，避免与窗口级 keydown 重复
+    if (capabilities?.global_input_available) {
+      return
+    }
+
+    const shouldIgnoreTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el) return false
+      const tag = el.tagName?.toLowerCase()
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable
+    }
+
+    const onKey = (event: KeyboardEvent, pressed: boolean) => {
+      if (shouldIgnoreTarget(event.target)) return
+      const keyCode = event.keyCode || 0
+      if (!keyCode) return
+      if (!pressed && event.repeat) return
+      void invoke('relay_key_event', { keyCode, pressed }).catch(() => {
+        // suppress relay noise
+      })
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => onKey(e, true)
+    const onKeyUp = (e: KeyboardEvent) => onKey(e, false)
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [activeClient, appState?.mode, capabilities?.global_input_available, invoke, isRunning])
 
   return (
     <div className="app-container">
@@ -243,6 +368,14 @@ function App() {
             <div className="status-item">
               <span className="status-label">输入后端:</span>
               <span className="status-value">{capabilities.input_backend}</span>
+            </div>
+            <div className="status-item">
+              <span className="status-label">全局输入转发:</span>
+              <span className="status-value">
+                {capabilities.global_input_available
+                  ? '后端 rdev（无需焦点在本窗口）'
+                  : '未启用（需 Linux + DISPLAY / X11）'}
+              </span>
             </div>
             {capabilities.blocking_issues.length > 0 && (
               <div className="runtime-warning">
@@ -364,6 +497,35 @@ function App() {
         )}
 
         <div className="action-buttons">
+          {mode === 'server' && isRunning && activeClient && pointerLockEnabled && !pointerLocked && (
+            <button
+              className="small-btn"
+              onClick={() => document.documentElement.requestPointerLock()}
+              style={{ marginRight: '0.5rem' }}
+            >
+              锁定鼠标捕获
+            </button>
+          )}
+          {mode === 'server' && pointerLocked && (
+            <button
+              className="danger-btn"
+              onClick={() => document.exitPointerLock()}
+              style={{ marginRight: '0.5rem' }}
+            >
+              解除鼠标锁定
+            </button>
+          )}
+          {mode === 'server' && (
+            <label style={{ marginRight: '0.75rem', fontSize: '0.85rem' }}>
+              <input
+                type="checkbox"
+                checked={pointerLockEnabled}
+                onChange={(e) => setPointerLockEnabled(e.target.checked)}
+                style={{ marginRight: '0.35rem' }}
+              />
+              使用 PointerLock 相对移动
+            </label>
+          )}
           {!isRunning ? (
             <button className="start-btn" onClick={handleStart}>
               ▶️ Start {mode === 'server' ? 'Server' : 'Client'}
@@ -396,6 +558,12 @@ function App() {
               <div className="status-item">
                 <span className="status-label">当前边缘目标:</span>
                 <span className="status-value">{activeClient ?? '未触发'}</span>
+              </div>
+            )}
+            {appState.mode === 'server' && (
+              <div className="status-item">
+                <span className="status-label">鼠标锁定:</span>
+                <span className="status-value">{pointerLocked ? '已锁定' : '未锁定'}</span>
               </div>
             )}
           </div>
