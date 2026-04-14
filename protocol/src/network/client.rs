@@ -3,9 +3,12 @@
 //! This module implements the Barrier client that connects to a server.
 
 use crate::protocol::{client_handshake, HandshakeResult, Message, ProtocolResult};
+use crate::protocol::message::message_types;
 use crate::network::Connection;
 use log::{error, info, warn};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Client configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -75,6 +78,8 @@ pub struct BarrierClient {
     config: ClientConfig,
     state: ClientState,
     connection: Option<Connection>,
+    read_half: Option<OwnedReadHalf>,
+    write_half: Option<OwnedWriteHalf>,
     handshake_result: Option<HandshakeResult>,
 }
 
@@ -85,6 +90,8 @@ impl BarrierClient {
             config,
             state: ClientState::Disconnected,
             connection: None,
+            read_half: None,
+            write_half: None,
             handshake_result: None,
         }
     }
@@ -116,13 +123,9 @@ impl BarrierClient {
         
         info!("TCP connection established");
         
-        // Create connection wrapper
-        let mut connection = Connection::new(stream, 0);
-        
-        // Perform handshake
+        // Perform handshake on owned halves, and keep them after handshake.
         self.state = ClientState::Authenticating;
-        
-        let (mut read_half, mut write_half) = connection.split();
+        let (mut read_half, mut write_half) = stream.into_split();
         
         let handshake_result = match client_handshake(
             &mut write_half,
@@ -139,7 +142,9 @@ impl BarrierClient {
         info!("Handshake completed: {:?}", handshake_result);
         
         // Recreate connection from stream (need to handle this better)
-        // For now, we'll just store the handshake result
+        // Keep halves alive so the TCP session remains connected.
+        self.read_half = Some(read_half);
+        self.write_half = Some(write_half);
         self.handshake_result = Some(handshake_result);
         self.state = ClientState::Ready;
         
@@ -149,6 +154,8 @@ impl BarrierClient {
     /// Disconnect from server
     pub async fn disconnect(&mut self) {
         self.connection = None;
+        self.read_half = None;
+        self.write_half = None;
         self.handshake_result = None;
         self.state = ClientState::Disconnected;
         info!("Disconnected from server");
@@ -156,8 +163,11 @@ impl BarrierClient {
 
     /// Send a message to the server
     pub async fn send(&mut self, message: &Message) -> ProtocolResult<()> {
-        if let Some(conn) = &mut self.connection {
-            conn.send(message).await
+        if let Some(writer) = &mut self.write_half {
+            let bytes = message.serialize()?;
+            writer.write_all(&bytes).await?;
+            writer.flush().await?;
+            Ok(())
         } else {
             Err(ProtocolError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
@@ -168,8 +178,34 @@ impl BarrierClient {
 
     /// Receive a message from the server
     pub async fn receive(&mut self) -> ProtocolResult<Message> {
-        if let Some(conn) = &mut self.connection {
-            conn.receive().await
+        if let Some(reader) = &mut self.read_half {
+            // Read size (4 bytes)
+            let mut size_buf = [0u8; 4];
+            reader.read_exact(&mut size_buf).await?;
+            let size = u32::from_be_bytes(size_buf) as usize;
+
+            // Read type (4 bytes)
+            let mut type_buf = [0u8; 4];
+            reader.read_exact(&mut type_buf).await?;
+
+            // Calculate data length
+            let data_len = size.saturating_sub(8);
+            let mut data = vec![0u8; data_len];
+            if data_len > 0 {
+                reader.read_exact(&mut data).await?;
+            }
+
+            // Read checksum (4 bytes)
+            let mut checksum_buf = [0u8; 4];
+            reader.read_exact(&mut checksum_buf).await?;
+            let stored_checksum = u32::from_be_bytes(checksum_buf);
+            let calculated_checksum = data.iter().fold(0u32, |acc, &b| acc ^ (b as u32));
+            if stored_checksum != calculated_checksum {
+                return Err(ProtocolError::ChecksumMismatch);
+            }
+
+            let msg_type = crate::protocol::MessageType::from_bytes(type_buf);
+            Ok(Message { msg_type, data })
         } else {
             Err(ProtocolError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
@@ -189,12 +225,26 @@ impl BarrierClient {
             match self.connect().await {
                 Ok(_) => {
                     info!("Successfully connected to server");
-                    
-                    // TODO: Main message processing loop would go here
-                    // For now, we just stay connected
-                    
-                    // Keep connection alive
-                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+
+                    // Basic message processing loop for screen-switch signals.
+                    loop {
+                        match self.receive().await {
+                            Ok(msg) => {
+                                if msg.msg_type == message_types::CLIENT_ENTER {
+                                    info!("Received CINN: input focus entered this client");
+                                } else if msg.msg_type == message_types::CLIENT_LEAVE {
+                                    info!("Received COUT: input focus left this client");
+                                } else {
+                                    info!("Received message type: {}", msg.msg_type);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Receive error, disconnecting: {}", e);
+                                self.disconnect().await;
+                                break;
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("Connection error: {}", e);

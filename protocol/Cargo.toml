@@ -49,3 +49,8 @@ core-graphics = "0.24"
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+[features]
+default = []
+x11 = []
+wayland = []

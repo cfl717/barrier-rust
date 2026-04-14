@@ -12,9 +12,9 @@ body {
 }
 
 .app-container {
-  max-width: 1024px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem 1.25rem;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -22,18 +22,18 @@ body {
 
 .header {
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   color: white;
 }
 
 .header h1 {
-  font-size: 3rem;
-  margin-bottom: 0.5rem;
+  font-size: 2.25rem;
+  margin-bottom: 0.35rem;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .subtitle {
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   opacity: 0.9;
 }
 
@@ -41,24 +41,52 @@ body {
   flex: 1;
   background: white;
   border-radius: 12px;
-  padding: 2rem;
+  padding: 1.25rem;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
 }
 
 .mode-selector {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 2rem;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.runtime-capability-panel {
+  margin-bottom: 1rem;
+  padding: 0.85rem;
+  border: 1px solid #d9e0f5;
+  border-radius: 8px;
+  background: #f5f8ff;
+}
+
+.runtime-capability-panel h3 {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.runtime-warning,
+.runtime-hint {
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.runtime-warning {
+  color: #b13b47;
+}
+
+.runtime-hint {
+  color: #3b4a74;
 }
 
 .mode-btn {
   flex: 1;
-  padding: 1.5rem;
+  padding: 0.9rem;
   border: 2px solid #e0e0e0;
   border-radius: 8px;
   background: #f8f9fa;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.92rem;
   transition: all 0.3s ease;
   text-align: left;
 }
@@ -80,7 +108,7 @@ body {
 }
 
 .server-input {
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .server-input label {
@@ -92,11 +120,83 @@ body {
 
 .server-input input {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.6rem 0.7rem;
   border: 2px solid #e0e0e0;
   border-radius: 6px;
-  font-size: 1rem;
+  font-size: 0.92rem;
   transition: border-color 0.3s ease;
+}
+
+.server-config-panel {
+  margin-bottom: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafbff;
+}
+
+.server-config-panel h3 {
+  margin-bottom: 0.75rem;
+  font-size: 0.98rem;
+}
+
+.server-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.clients-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.clients-header h4 {
+  font-size: 0.92rem;
+  color: #444;
+}
+
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.route-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 110px 68px;
+  gap: 0.45rem;
+}
+
+.route-row input,
+.route-row select {
+  width: 100%;
+  border: 1px solid #d7dbe8;
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.84rem;
+}
+
+.small-btn,
+.danger-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.small-btn {
+  background: #667eea;
+  color: #fff;
+}
+
+.danger-btn {
+  background: #f5576c;
+  color: #fff;
 }
 
 .server-input input:focus {
@@ -110,14 +210,14 @@ body {
 }
 
 .action-buttons {
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   text-align: center;
 }
 
 .start-btn,
 .stop-btn {
-  padding: 1rem 3rem;
-  font-size: 1.2rem;
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -148,20 +248,22 @@ body {
 .status-panel {
   background: #f8f9fa;
   border-radius: 8px;
-  padding: 1.5rem;
-  margin-bottom: 2rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
 }
 
 .status-panel h3 {
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   color: #333;
+  font-size: 1rem;
 }
 
 .status-item {
   display: flex;
   justify-content: space-between;
-  padding: 0.5rem 0;
+  padding: 0.35rem 0;
   border-bottom: 1px solid #e0e0e0;
+  font-size: 0.92rem;
 }
 
 .status-item:last-child {
@@ -181,23 +283,24 @@ body {
 .log-panel {
   background: #1e1e1e;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1rem;
   color: #d4d4d4;
 }
 
 .log-panel h3 {
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   color: #fff;
+  font-size: 1rem;
 }
 
 .log-content {
-  height: 200px;
+  height: 150px;
   overflow-y: auto;
   font-family: 'Courier New', Courier, monospace;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   background: #2d2d2d;
   border-radius: 4px;
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .no-logs {
@@ -206,8 +309,8 @@ body {
 }
 
 .log-entry {
-  margin-bottom: 0.5rem;
-  padding: 0.25rem 0;
+  margin-bottom: 0.35rem;
+  padding: 0.2rem 0;
   border-bottom: 1px solid #3d3d3d;
 }
 
@@ -217,10 +320,10 @@ body {
 
 .footer {
   text-align: center;
-  margin-top: 2rem;
+  margin-top: 0.75rem;
   color: white;
   opacity: 0.8;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 /* Scrollbar styling */
@@ -258,5 +361,13 @@ body {
 
   .mode-btn {
     text-align: center;
+  }
+
+  .server-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .route-row {
+    grid-template-columns: 1fr;
   }
 }

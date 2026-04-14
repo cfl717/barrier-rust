@@ -1,77 +1,12 @@
 {
-  "package": {
-    "productName": "barrier-tauri",
-    "version": "3.0.0-alpha.1"
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "barrier-tauri",
+  "version": "3.0.0-alpha.1",
+  "identifier": "org.barrier.tauri",
+  "build": {
+    "frontendDist": "../dist"
   },
-  "tauri": {
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "org.barrier.tauri",
-      "icon": [
-        "icons/icon_32x32.png",
-        "icons/icon_128x128.png",
-        "icons/icon_128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "resources": [],
-      "externalBin": [],
-      "copyright": "",
-      "category": "Utility",
-      "shortDescription": "Barrier - Share mouse and keyboard across computers",
-      "longDescription": "Barrier is an open source software KVM (keyboard, video, mouses) switch that allows you to use one set of keyboard, mouse, and monitor to control multiple computers.",
-      "deb": {
-        "depends": []
-      },
-      "macOS": {
-        "entitlements": null,
-        "exceptionDomain": "",
-        "frameworks": [],
-        "providerShortName": null,
-        "signingIdentity": null
-      },
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
-      }
-    },
-    "updater": {
-      "active": false
-    },
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "dialog": {
-        "all": true,
-        "ask": true,
-        "confirm": true,
-        "message": true,
-        "open": true,
-        "save": true
-      },
-      "fs": {
-        "all": true,
-        "readFile": true,
-        "writeFile": true,
-        "readDir": true,
-        "copyFile": true,
-        "createDir": true,
-        "removeDir": true,
-        "removeFile": true,
-        "renameFile": true,
-        "exists": true
-      },
-      "clipboard": {
-        "all": true,
-        "writeText": true,
-        "readText": true
-      }
-    },
+  "app": {
     "windows": [
       {
         "title": "Barrier",
@@ -86,6 +21,40 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon_32x32.png",
+      "icons/icon_128x128.png",
+      "icons/icon_128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "externalBin": [],
+    "copyright": "",
+    "category": "Utility",
+    "shortDescription": "Barrier - Share mouse and keyboard across computers",
+    "longDescription": "Barrier is an open source software KVM (keyboard, video, mouses) switch that allows you to use one set of keyboard, mouse, and monitor to control multiple computers.",
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
     }
   }
 }

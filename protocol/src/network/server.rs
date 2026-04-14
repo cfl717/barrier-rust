@@ -4,10 +4,14 @@
 
 use crate::protocol::{server_handshake, HandshakeResult, Message, ProtocolResult};
 use crate::network::Connection;
+use crate::protocol::events::ClientEnterEvent;
+use crate::protocol::message::message_types;
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 
 /// Default Barrier server port
@@ -79,9 +83,14 @@ pub struct ClientInfo {
 /// Barrier server state
 pub struct BarrierServer {
     config: ServerConfig,
-    clients: Arc<Mutex<HashMap<u64, ClientInfo>>>,
+    clients: Arc<Mutex<HashMap<String, ClientSession>>>,
     next_client_id: u64,
     event_tx: mpsc::Sender<ServerEvent>,
+}
+
+struct ClientSession {
+    info: ClientInfo,
+    writer: Arc<Mutex<OwnedWriteHalf>>,
 }
 
 /// Server events
@@ -153,23 +162,65 @@ impl BarrierServer {
 
     /// Get list of connected clients
     pub async fn get_clients(&self) -> Vec<ClientInfo> {
-        self.clients.lock().await.values().cloned().collect()
+        self.clients
+            .lock()
+            .await
+            .values()
+            .map(|session| session.info.clone())
+            .collect()
     }
 
     /// Get client count
     pub async fn client_count(&self) -> usize {
         self.clients.lock().await.len()
     }
+
+    /// Switch input focus to a specific client by screen name.
+    pub async fn switch_to_client(&self, screen_name: &str) -> Result<(), String> {
+        let writer = {
+            let clients = self.clients.lock().await;
+            clients
+                .get(screen_name)
+                .map(|session| Arc::clone(&session.writer))
+                .ok_or_else(|| format!("客户端 `{}` 未连接", screen_name))?
+        };
+
+        let leave_msg = Message::empty(message_types::CLIENT_LEAVE);
+        let enter_msg = ClientEnterEvent::new(1, 0, 0, 0).to_message();
+
+        let leave_bytes = leave_msg
+            .serialize()
+            .map_err(|e| format!("序列化 COUT 失败: {}", e))?;
+        let enter_bytes = enter_msg
+            .serialize()
+            .map_err(|e| format!("序列化 CINN 失败: {}", e))?;
+
+        let mut writer = writer.lock().await;
+        writer
+            .write_all(&leave_bytes)
+            .await
+            .map_err(|e| format!("发送 COUT 失败: {}", e))?;
+        writer
+            .write_all(&enter_bytes)
+            .await
+            .map_err(|e| format!("发送 CINN 失败: {}", e))?;
+        writer
+            .flush()
+            .await
+            .map_err(|e| format!("刷新切换消息失败: {}", e))?;
+
+        Ok(())
+    }
 }
 
 /// Handle a single client connection
 async fn handle_client(
-    mut connection: Connection,
+    connection: Connection,
     peer_addr: String,
     client_id: u64,
-    clients: Arc<Mutex<HashMap<u64, ClientInfo>>>,
+    clients: Arc<Mutex<HashMap<String, ClientSession>>>,
     event_tx: mpsc::Sender<ServerEvent>,
-    config: ServerConfig,
+    _config: ServerConfig,
 ) -> ProtocolResult<()> {
     let (mut read_half, mut write_half) = connection.split();
     
@@ -201,17 +252,38 @@ async fn handle_client(
         address: peer_addr,
     };
     
-    clients.lock().await.insert(client_id, client_info.clone());
+    let screen_name = client_info.screen_name.clone();
+    let writer = Arc::new(Mutex::new(write_half));
+    clients.lock().await.insert(
+        screen_name.clone(),
+        ClientSession {
+            info: client_info.clone(),
+            writer,
+        },
+    );
     
     // Notify about new client
     let _ = event_tx.send(ServerEvent::ClientConnected(client_info)).await;
     
     info!("Client {} registered", client_id);
-    
-    // TODO: Main message processing loop would go here
-    // For now, we just keep the connection open
-    
+
+    wait_for_disconnect(&mut read_half).await;
+    clients.lock().await.remove(&screen_name);
+    let _ = event_tx.send(ServerEvent::ClientDisconnected(client_id)).await;
+    info!("Client {} disconnected", client_id);
+
     Ok(())
+}
+
+async fn wait_for_disconnect(read_half: &mut OwnedReadHalf) {
+    let mut buf = [0u8; 1024];
+    loop {
+        match read_half.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
 }
 
 #[cfg(test)]

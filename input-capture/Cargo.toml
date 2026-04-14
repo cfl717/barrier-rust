@@ -38,4 +38,6 @@ tokio = { version = "1", features = ["full"] }
 
 [features]
 default = []
+x11 = []
+wayland = []
 test-mock = []
