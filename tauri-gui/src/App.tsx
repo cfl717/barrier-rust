@@ -7,6 +7,7 @@ interface AppState {
   is_running: boolean
   connected_clients: number
   server_address: string
+  active_client: string | null
   log_messages: string[]
 }
 
@@ -70,6 +71,7 @@ function App() {
       const status = await invoke<AppState>('get_status')
       setAppState(status)
       setIsRunning(status.is_running)
+      setActiveClient(status.active_client ?? null)
       setLogs(prevLogs => (
         status.log_messages.length > prevLogs.length ? status.log_messages : prevLogs
       ))
@@ -209,6 +211,9 @@ function App() {
               setLogs(prev => [...prev, message])
             })
             .catch((error) => {
+              if (String(error).includes('当前没有激活客户端')) {
+                setActiveClient(null)
+              }
               setLogs(prev => [...prev, `Return local failed: ${String(error)}`])
             })
           return
@@ -224,7 +229,6 @@ function App() {
       }
 
       lastEdgeSwitchTsRef.current = now
-      setActiveClient(matched.name)
       const entry = computeRemoteEntryPoint(edge, event)
       void invoke<string>('switch_client', {
         request: {
@@ -235,6 +239,7 @@ function App() {
         },
       })
         .then((message) => {
+          setActiveClient(matched.name)
           setLogs(prev => [...prev, message])
         })
         .catch((error) => {
@@ -262,6 +267,9 @@ function App() {
               setLogs(prev => [...prev, message])
             })
             .catch((error) => {
+              if (String(error).includes('当前没有激活客户端')) {
+                setActiveClient(null)
+              }
               setLogs(prev => [...prev, `Return local failed: ${String(error)}`])
             })
           return
@@ -277,7 +285,6 @@ function App() {
       }
 
       lastEdgeSwitchTsRef.current = now
-      setActiveClient(matched.name)
       const entry = computeRemoteEntryPoint(edge, event)
       void invoke<string>('switch_client', {
         request: {
@@ -288,6 +295,7 @@ function App() {
         },
       })
         .then((message) => {
+          setActiveClient(matched.name)
           setLogs(prev => [...prev, message])
         })
         .catch((error) => {

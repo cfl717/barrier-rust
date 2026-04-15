@@ -4,12 +4,15 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::OpenOptions;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::Manager;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use barrier_protocol::{BarrierServer, BarrierClient, ServerConfig, ClientConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +21,7 @@ pub struct AppState {
     pub is_running: bool,
     pub connected_clients: u32,
     pub server_address: String,
+    pub active_client: Option<String>,
     pub log_messages: Vec<String>,
 }
 
@@ -49,6 +53,7 @@ impl Default for AppState {
             is_running: false,
             connected_clients: 0,
             server_address: String::new(),
+            active_client: None,
             log_messages: Vec::new(),
         }
     }
@@ -91,20 +96,17 @@ async fn start_server(state: tauri::State<'_, Arc<Mutex<BarrierState>>>, config:
     let mut state_guard = state.lock().await;
 
     if let Some(task) = state_guard.client_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
     state_guard.client = None;
 
     if let Some(task) = state_guard.server_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
 
     let port = parse_port_from_server_config(&config);
     let bind_addr = format!("0.0.0.0:{port}");
-    let listener = TcpListener::bind(&bind_addr)
-        .await
-        .map_err(|e| format!("无法启动服务端（{}）: {}", bind_addr, e))?;
-    drop(listener);
+    ensure_bind_address_available(&bind_addr).await?;
 
     let (server, _event_rx) = BarrierServer::new(config);
     let server_arc = Arc::new(Mutex::new(server));
@@ -136,12 +138,12 @@ async fn start_client(state: tauri::State<'_, Arc<Mutex<BarrierState>>>, config:
     let mut state_guard = state.lock().await;
 
     if let Some(task) = state_guard.server_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
     state_guard.server = None;
 
     if let Some(task) = state_guard.client_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
 
     let target_server = config.server_addr.clone();
@@ -154,6 +156,7 @@ async fn start_client(state: tauri::State<'_, Arc<Mutex<BarrierState>>>, config:
     state_guard.client = Some(client_arc.clone());
     state_guard.mode = Some("client".to_string());
     state_guard.server_address = target_server;
+    state_guard.active_client = None;
     let current_server_address = state_guard.server_address.clone();
     state_guard.last_error = None;
     append_log(&mut state_guard, format!("Client starting -> {}", current_server_address));
@@ -178,10 +181,10 @@ async fn stop_service(state: tauri::State<'_, Arc<Mutex<BarrierState>>>) -> Resu
     let mut state_guard = state.lock().await;
 
     if let Some(task) = state_guard.server_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
     if let Some(task) = state_guard.client_task.take() {
-        task.abort();
+        abort_task_and_wait(task).await;
     }
 
     state_guard.server = None;
@@ -210,22 +213,54 @@ async fn switch_client(
         )
     };
 
+    let requested_name = request.client_name.trim().to_string();
+    if requested_name.is_empty() {
+        return Err("客户端名称不能为空".to_string());
+    }
+
+    let mut switched_to = requested_name.clone();
+
     {
         let server = server_arc.lock().await;
+        let connected_clients = server.get_clients().await;
+        let connected_names: Vec<String> = connected_clients
+            .iter()
+            .map(|client| client.screen_name.clone())
+            .collect();
+
+        if !connected_names.iter().any(|name| name == &requested_name) {
+            if connected_names.len() == 1 {
+                switched_to = connected_names[0].clone();
+                log::warn!(
+                    "请求切换客户端 `{}` 未命中，自动切换到唯一在线客户端 `{}`",
+                    requested_name,
+                    switched_to
+                );
+            } else if connected_names.is_empty() {
+                return Err("当前没有已连接客户端，请先启动并连接客户端".to_string());
+            } else {
+                return Err(format!(
+                    "目标客户端 `{}` 未连接。当前已连接客户端：{}",
+                    requested_name,
+                    connected_names.join(", ")
+                ));
+            }
+        }
+
         if let Some(previous) = previous_active_client.as_ref() {
-            if previous != &request.client_name {
+            if previous != &switched_to {
                 let _ = server.send_leave(previous).await;
             }
         }
         server
-            .send_enter(&request.client_name, request.cursor_x, request.cursor_y)
+            .send_enter(&switched_to, request.cursor_x, request.cursor_y)
             .await?;
     }
 
     let message = format!(
         "Edge switch [{}] -> {} ({})",
         request.edge,
-        request.client_name,
+        switched_to,
         request
             .client_address
             .clone()
@@ -233,7 +268,7 @@ async fn switch_client(
     );
 
     let mut state_guard = state.lock().await;
-    state_guard.active_client = Some(request.client_name.clone());
+    state_guard.active_client = Some(switched_to);
     state_guard.last_error = None;
     append_log(&mut state_guard, message.clone());
     Ok(message)
@@ -346,12 +381,13 @@ async fn relay_mouse_button(
 
 #[tauri::command]
 async fn get_status(state: tauri::State<'_, Arc<Mutex<BarrierState>>>) -> Result<AppState, String> {
-    let (server_opt, client_opt, server_address, log_messages) = {
+    let (server_opt, client_opt, server_address, active_client, log_messages) = {
         let state_guard = state.lock().await;
         (
             state_guard.server.clone(),
             state_guard.client.clone(),
             state_guard.server_address.clone(),
+            state_guard.active_client.clone(),
             state_guard.log_messages.clone(),
         )
     };
@@ -368,6 +404,7 @@ async fn get_status(state: tauri::State<'_, Arc<Mutex<BarrierState>>>) -> Result
             is_running: true,
             connected_clients,
             server_address,
+            active_client,
             log_messages,
         }
     } else if client_opt.is_some() {
@@ -376,6 +413,7 @@ async fn get_status(state: tauri::State<'_, Arc<Mutex<BarrierState>>>) -> Result
             is_running: true,
             connected_clients: 0,
             server_address,
+            active_client: None,
             log_messages,
         }
     } else {
@@ -402,6 +440,41 @@ fn parse_port_from_server_config(config: &ServerConfig) -> u16 {
         }
     }
     config.port
+}
+
+async fn abort_task_and_wait(task: JoinHandle<()>) {
+    task.abort();
+    if let Err(join_err) = task.await {
+        if !join_err.is_cancelled() {
+            log::warn!("后台任务停止时出现异常: {}", join_err);
+        }
+    }
+}
+
+async fn ensure_bind_address_available(bind_addr: &str) -> Result<(), String> {
+    const MAX_BIND_RETRIES: usize = 6;
+    const RETRY_DELAY: Duration = Duration::from_millis(120);
+
+    for attempt in 0..MAX_BIND_RETRIES {
+        match TcpListener::bind(bind_addr).await {
+            Ok(listener) => {
+                drop(listener);
+                return Ok(());
+            }
+            Err(err) if err.kind() == ErrorKind::AddrInUse && attempt + 1 < MAX_BIND_RETRIES => {
+                sleep(RETRY_DELAY).await;
+            }
+            Err(err) if err.kind() == ErrorKind::AddrInUse => {
+                return Err(format!(
+                    "无法启动服务端（{}）: 地址已在使用。请关闭占用该端口的进程，或换一个监听端口后重试。",
+                    bind_addr
+                ));
+            }
+            Err(err) => return Err(format!("无法启动服务端（{}）: {}", bind_addr, err)),
+        }
+    }
+
+    Err(format!("无法启动服务端（{}）: 端口检查失败", bind_addr))
 }
 
 fn detect_runtime_capabilities() -> RuntimeCapabilities {
