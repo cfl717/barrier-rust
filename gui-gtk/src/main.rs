@@ -197,16 +197,33 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
                     ));
                 }
                 UiMessage::Status(status) => {
+                    let active_str = status.active_client.clone().unwrap_or_else(|| "无".to_string());
+                    let input_hint = if status.mode == "server" && status.is_running {
+                        if status.connected_clients > 0 && status.active_client.is_some() {
+                            " [输入已转发]"
+                        } else if status.connected_clients > 0 {
+                            " [客户端已连接，点击「切换到首个客户端」激活]"
+                        } else {
+                            " [等待客户端连接]"
+                        }
+                    } else if status.mode == "client" && status.is_running {
+                        " [等待 Server 激活]"
+                    } else {
+                        ""
+                    };
                     status_label_clone.set_text(&format!(
-                        "状态: mode={} running={} clients={} active={}",
+                        "状态: {} | 运行={} | 客户端数={} | 激活={}{}",
                         status.mode,
-                        status.is_running,
+                        if status.is_running { "是" } else { "否" },
                         status.connected_clients,
-                        status.active_client.unwrap_or_else(|| "none".to_string())
+                        active_str,
+                        input_hint
                     ));
-                    logs_text_clone
-                        .buffer()
-                        .set_text(&status.log_messages.join("\n"));
+                    let log_content = status.log_messages.join("\n");
+                    let current_log = text_view_content(&logs_text_clone);
+                    if log_content.len() > current_log.len() || current_log.is_empty() {
+                        logs_text_clone.buffer().set_text(&log_content);
+                    }
                 }
                 UiMessage::Success(message) => {
                     let current = text_view_content(&logs_text_clone);

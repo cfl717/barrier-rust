@@ -186,6 +186,8 @@ impl BarrierCore {
             }
         });
         guard.server_task = Some(task);
+        append_log(&mut guard, "Server 正在监听，等待客户端连接…".to_string());
+        append_log(&mut guard, "提示：客户端连接后，点击「切换到首个客户端」可激活输入转发".to_string());
 
         drop(guard);
         self.broadcast_status().await;
@@ -240,6 +242,7 @@ impl BarrierCore {
             }
         });
         guard.client_task = Some(task);
+        append_log(&mut guard, "Client 已连接，等待 Server 激活输入…".to_string());
 
         drop(guard);
         self.broadcast_status().await;
@@ -460,7 +463,14 @@ impl BarrierCore {
                 log_messages,
             }
         } else {
-            AppState::default()
+            AppState {
+                mode: "idle".to_string(),
+                is_running: false,
+                connected_clients: 0,
+                server_address,
+                active_client: None,
+                log_messages,
+            }
         };
         Ok(status)
     }
