@@ -19,6 +19,7 @@ enum UiMessage {
 }
 
 fn main() -> Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let _ = adw::init();
     let runtime = Arc::new(Runtime::new()?);
     let core = Arc::new(BarrierCore::new());
@@ -163,31 +164,32 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
 
     let (ui_tx, ui_rx) = unbounded::<UiMessage>();
 
-    let status_label_clone = status_label.clone();
-    let logs_text_clone = logs_text.clone();
-    let runtime_panel_clone = runtime_panel.clone();
-    let mode_combo_clone = mode_combo.clone();
-    let port_entry_clone = port_entry.clone();
-    let screen_entry_clone = screen_entry.clone();
-    let server_addr_entry_clone = server_addr_entry.clone();
-    let client_name_entry_clone = client_name_entry.clone();
-    let routes_text_clone = routes_text.clone();
+    let ui_rx_clone = ui_rx.clone();
+    let status_label_ui = status_label.clone();
+    let logs_text_ui = logs_text.clone();
+    let runtime_panel_ui = runtime_panel.clone();
+    let mode_combo_ui = mode_combo.clone();
+    let port_entry_ui = port_entry.clone();
+    let screen_entry_ui = screen_entry.clone();
+    let server_addr_entry_ui = server_addr_entry.clone();
+    let client_name_entry_ui = client_name_entry.clone();
+    let routes_text_ui = routes_text.clone();
 
-    glib::spawn_future_local(async move {
-        while let Ok(msg) = ui_rx.recv().await {
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        while let Ok(msg) = ui_rx_clone.try_recv() {
             match msg {
                 UiMessage::Loaded(settings) => {
-                    mode_combo_clone.set_active_id(Some(&settings.last_mode));
-                    port_entry_clone.set_text(&settings.server_port.to_string());
-                    screen_entry_clone.set_text(&settings.server_screen_name);
-                    server_addr_entry_clone.set_text(&settings.server_address);
-                    client_name_entry_clone.set_text(&settings.client_name);
-                    routes_text_clone
+                    mode_combo_ui.set_active_id(Some(&settings.last_mode));
+                    port_entry_ui.set_text(&settings.server_port.to_string());
+                    screen_entry_ui.set_text(&settings.server_screen_name);
+                    server_addr_entry_ui.set_text(&settings.server_address);
+                    client_name_entry_ui.set_text(&settings.client_name);
+                    routes_text_ui
                         .buffer()
                         .set_text(&routes_to_text(&settings.client_routes));
                 }
                 UiMessage::Runtime(caps) => {
-                    runtime_panel_clone.set_text(&format!(
+                    runtime_panel_ui.set_text(&format!(
                         "运行环境: session={} backend={} x11={} wayland={} global_input={}",
                         caps.session_type,
                         caps.input_backend,
@@ -211,7 +213,7 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
                     } else {
                         ""
                     };
-                    status_label_clone.set_text(&format!(
+                    status_label_ui.set_text(&format!(
                         "状态: {} | 运行={} | 客户端数={} | 激活={}{}",
                         status.mode,
                         if status.is_running { "是" } else { "否" },
@@ -220,25 +222,23 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
                         input_hint
                     ));
                     let log_content = status.log_messages.join("\n");
-                    let current_log = text_view_content(&logs_text_clone);
-                    if log_content.len() > current_log.len() || current_log.is_empty() {
-                        logs_text_clone.buffer().set_text(&log_content);
-                    }
+                    logs_text_ui.buffer().set_text(&log_content);
                 }
                 UiMessage::Success(message) => {
-                    let current = text_view_content(&logs_text_clone);
-                    logs_text_clone
+                    let current = text_view_content(&logs_text_ui);
+                    logs_text_ui
                         .buffer()
                         .set_text(&format_log_append(&current, &message));
                 }
                 UiMessage::Error(message) => {
-                    let current = text_view_content(&logs_text_clone);
-                    logs_text_clone
+                    let current = text_view_content(&logs_text_ui);
+                    logs_text_ui
                         .buffer()
                         .set_text(&format_log_append(&current, &format!("ERROR: {message}")));
                 }
             }
         }
+        glib::ControlFlow::Continue
     });
 
     let bootstrap_core = core.clone();

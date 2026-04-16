@@ -1,6 +1,6 @@
 use crate::settings::SettingsStore;
 use crate::types::{AppSettings, AppState, CoreEvent, RuntimeCapabilities, SwitchClientRequest};
-use barrier_protocol::{BarrierClient, BarrierServer, ClientConfig, ServerConfig};
+use barrier_protocol::{BarrierClient, BarrierServer, ClientConfig, ClientsHandle, ServerConfig};
 use std::env;
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,6 +26,8 @@ pub struct BarrierCore {
 
 pub(crate) struct BarrierRuntimeState {
     pub(crate) server: Option<Arc<Mutex<BarrierServer>>>,
+    /// 独立的客户端句柄，可在不锁 server 的情况下查询
+    clients_handle: Option<ClientsHandle>,
     client: Option<Arc<Mutex<BarrierClient>>>,
     server_task: Option<JoinHandle<()>>,
     client_task: Option<JoinHandle<()>>,
@@ -48,6 +50,7 @@ impl BarrierCore {
         Self {
             state: Arc::new(Mutex::new(BarrierRuntimeState {
                 server: None,
+                clients_handle: None,
                 client: None,
                 server_task: None,
                 client_task: None,
@@ -160,8 +163,10 @@ impl BarrierCore {
         ensure_bind_address_available(&bind_addr).await?;
 
         let (server, _event_rx) = BarrierServer::new(config);
+        let clients_handle = server.clients_handle();
         let server_arc = Arc::new(Mutex::new(server));
         guard.server = Some(server_arc.clone());
+        guard.clients_handle = Some(clients_handle);
         guard.mode = Some("server".to_string());
         guard.active_client = None;
         guard.server_address = bind_addr.clone();
@@ -174,8 +179,13 @@ impl BarrierCore {
         }
 
         let task = tokio::spawn(async move {
-            let mut server = server_arc.lock().await;
-            if let Err(e) = server.run().await {
+            // 注意：不能长期持有 server_arc 的锁，否则会阻塞 get_status 等查询
+            // 这里只在启动时短暂获取锁来调用 run()，run() 内部会自行管理
+            let run_result = {
+                let mut server = server_arc.lock().await;
+                server.run().await
+            };
+            if let Err(e) = run_result {
                 log::error!("Server error: {}", e);
                 let mut state = state_handle.lock().await;
                 state.last_error = Some(format!("Server error: {}", e));
@@ -260,6 +270,7 @@ impl BarrierCore {
         }
 
         guard.server = None;
+        guard.clients_handle = None;
         guard.client = None;
         guard.mode = None;
         guard.active_client = None;
@@ -427,24 +438,26 @@ impl BarrierCore {
     }
 
     pub async fn get_status(&self) -> Result<AppState, String> {
-        let (server_opt, client_opt, server_address, active_client, log_messages) = {
+        let (server_opt, clients_handle, client_opt, server_address, active_client, log_messages) = {
             let state_guard = self.state.lock().await;
             (
-                state_guard.server.clone(),
-                state_guard.client.clone(),
+                state_guard.server.is_some(),
+                state_guard.clients_handle.clone(),
+                state_guard.client.is_some(),
                 state_guard.server_address.clone(),
                 state_guard.active_client.clone(),
                 state_guard.log_messages.clone(),
             )
         };
 
-        let connected_clients = if let Some(server) = &server_opt {
-            server.lock().await.client_count().await as u32
+        // 使用独立的 clients_handle 查询，避免锁 server
+        let connected_clients = if let Some(handle) = &clients_handle {
+            handle.count().await as u32
         } else {
             0
         };
 
-        let status = if server_opt.is_some() {
+        let status = if server_opt {
             AppState {
                 mode: "server".to_string(),
                 is_running: true,
@@ -453,7 +466,7 @@ impl BarrierCore {
                 active_client,
                 log_messages,
             }
-        } else if client_opt.is_some() {
+        } else if client_opt {
             AppState {
                 mode: "client".to_string(),
                 is_running: true,

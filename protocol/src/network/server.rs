@@ -88,6 +88,22 @@ pub struct BarrierServer {
     event_tx: mpsc::Sender<ServerEvent>,
 }
 
+/// 独立的客户端计数器，可在不锁 BarrierServer 的情况下查询
+#[derive(Clone)]
+pub struct ClientsHandle {
+    clients: Arc<Mutex<HashMap<String, ClientSession>>>,
+}
+
+impl ClientsHandle {
+    pub async fn count(&self) -> usize {
+        self.clients.lock().await.len()
+    }
+
+    pub async fn names(&self) -> Vec<String> {
+        self.clients.lock().await.keys().cloned().collect()
+    }
+}
+
 struct ClientSession {
     info: ClientInfo,
     writer: Arc<Mutex<OwnedWriteHalf>>,
@@ -121,16 +137,24 @@ impl BarrierServer {
         }
         
         let (tx, rx) = mpsc::channel(100);
+        let clients = Arc::new(Mutex::new(HashMap::new()));
         
         (
             Self {
                 config,
-                clients: Arc::new(Mutex::new(HashMap::new())),
+                clients,
                 next_client_id: 1,
                 event_tx: tx,
             },
             rx,
         )
+    }
+
+    /// 获取独立的客户端句柄，可在不锁 server 的情况下查询客户端数量
+    pub fn clients_handle(&self) -> ClientsHandle {
+        ClientsHandle {
+            clients: Arc::clone(&self.clients),
+        }
     }
 
     /// Start the server and accept connections
