@@ -13,7 +13,7 @@ This crate implements the Barrier network protocol in Rust, providing a safe and
 - ✅ **Clipboard Support**: Text, HTML, RTF, BMP, PNG formats
 - ✅ **Input Events**: Mouse move, button, wheel; keyboard key down/up
 - 🚧 **Platform Input Capture**: Stub implementations (Phase 2)
-- 🚧 **GUI Integration**: Tauri frontend (Phase 3)
+- 🚧 **GUI Integration**: Native frontends via shared `app-core` (Phase 3)
 
 ## Architecture
 
@@ -181,9 +181,9 @@ cargo run --example client
 - [ ] macOS Cocoa event tap
 - [ ] Clipboard integration
 
-### Phase 3: Tauri GUI
-- [ ] React/Vue frontend
-- [ ] System tray integration
+### Phase 3: Native GUI
+- [ ] Ubuntu GTK4/libadwaita frontend
+- [ ] macOS SwiftUI/AppKit frontend
 - [ ] Configuration UI
 - [ ] Connection status display
 

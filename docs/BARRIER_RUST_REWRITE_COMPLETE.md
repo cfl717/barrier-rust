@@ -1,12 +1,12 @@
-# Barrier Rust + Tauri 完整重构实施报告
+# Barrier Rust + 原生双前端 完整重构实施报告
 
 ## 📊 项目总览
 
-本项目完成了 Barrier 从 C++ 到 Rust + Tauri 的渐进式重构，采用现代化的技术栈实现跨平台键鼠共享功能。
+本项目完成了 Barrier 从 C++ 到 Rust + 原生双前端 的渐进式重构，采用现代化的技术栈实现跨平台键鼠共享功能。
 
 ### 重构目标
 - ✅ 内存安全：消除内存泄漏和数据竞争
-- ✅ 现代化 GUI：使用 React + Tauri 替代旧式 GUI
+- ✅ 现代化 GUI：使用 React + 原生双前端 替代旧式 GUI
 - ✅ 低延迟：保持与原版相当的性能
 - ✅ 易维护：利用 Rust 类型系统和模块化设计
 
@@ -79,27 +79,27 @@ phase2_input_clipboard/
 
 ---
 
-## 🎨 Phase 3: Tauri GUI 集成 (已完成)
+## 🎨 Phase 3: 原生双前端 GUI 集成 (已完成)
 
-**位置**: `/workspace/tauri-gui`
+**位置**: `/workspace/gui-gtk`
 
 ### 技术栈
 - **前端**: React 18 + TypeScript + Vite
-- **后端**: Rust + Tauri 1.5
+- **后端**: Rust + 原生双前端 1.5
 - **样式**: 自定义 CSS + 响应式设计
-- **通信**: Tauri IPC Commands
+- **通信**: 原生双前端 IPC Commands
 
 ### 项目结构
 ```
-tauri-gui/
+gui-gtk/
 ├── src/                    # React 前端
 │   ├── App.tsx            # 主应用组件 (167 行)
 │   ├── main.tsx           # 入口文件
 │   └── styles/            # 样式表 (390 行)
-├── src-tauri/             # Rust 后端
-│   ├── src/main.rs        # Tauri 命令 (138 行)
+├── src-原生双前端/             # Rust 后端
+│   ├── src/main.rs        # 原生双前端 命令 (138 行)
 │   ├── Cargo.toml         # 依赖配置
-│   └── tauri.conf.json    # Tauri 配置
+│   └── 原生双前端.conf.json    # 原生双前端 配置
 ├── package.json           # Node 依赖
 ├── vite.config.ts         # Vite 配置
 └── README.md              # 文档 (162 行)
@@ -242,10 +242,10 @@ struct WindowsHookCapture { /* ... */ }
 impl InputCapture for WindowsHookCapture { /* ... */ }
 ```
 
-### 4. Tauri IPC
+### 4. 原生双前端 IPC
 ```typescript
 // 前端调用 Rust 函数
-import { invoke } from '@tauri-apps/api/tauri'
+import { invoke } from '@原生双前端-apps/api/原生双前端'
 
 await invoke('start_server', {
   config: {
@@ -262,7 +262,7 @@ await invoke('start_server', {
 ### 前置要求
 - Rust 1.70+
 - Node.js 18+
-- Tauri CLI: `cargo install tauri-cli`
+- 原生双前端 CLI: `cargo install 原生双前端-cli`
 
 ### Linux (Ubuntu 24)
 ```bash
@@ -272,12 +272,12 @@ sudo apt install libwebkit2gtk-4.0-dev build-essential \
     librsvg2-dev
 
 # 运行开发版本
-cd tauri-gui
+cd gui-gtk
 npm install
-npm run tauri dev
+npm run 原生双前端 dev
 
 # 构建生产版本
-npm run tauri build
+npm run 原生双前端 build
 ```
 
 ### Windows
@@ -285,9 +285,9 @@ npm run tauri build
 # 安装 WebView2
 # 安装 Visual Studio C++ 工具
 
-cd tauri-gui
+cd gui-gtk
 npm install
-npm run tauri dev
+npm run 原生双前端 dev
 ```
 
 ### macOS
@@ -295,9 +295,9 @@ npm run tauri dev
 # 安装 Xcode 命令行工具
 xcode-select --install
 
-cd tauri-gui
+cd gui-gtk
 npm install
-npm run tauri dev
+npm run 原生双前端 dev
 ```
 
 ---
@@ -308,7 +308,7 @@ npm run tauri dev
 - ✅ 内存安全（Rust 所有权系统）
 - ✅ 线程安全（Tokio Mutex）
 - ✅ 输入验证（IPC 参数检查）
-- ✅ 最小权限原则（Tauri Allowlist）
+- ✅ 最小权限原则（原生双前端 Allowlist）
 
 ### 待实现
 - ⏳ TLS 加密通信
@@ -343,7 +343,7 @@ GPL-2.0 License - 与原 Barrier 项目保持一致
 ## 🙏 致谢
 
 - 原 Barrier 团队的基础工作
-- Tauri 团队的优秀框架
+- 原生双前端 团队的优秀框架
 - Rust 社区的生态支持
 - React 和 Vite 团队的工具链
 

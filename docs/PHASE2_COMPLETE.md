@@ -139,6 +139,6 @@ To complete the full Barrier implementation:
 |-------|-------------|--------|
 | Phase 1 | Protocol Scaffold | ✅ Complete |
 | **Phase 2** | **Input Capture Layer** | **✅ Complete** |
-| Phase 3 | Tauri GUI | ✅ Complete |
+| Phase 3 | 原生双前端 GUI | ✅ Complete |
 
 All three main phases are now structurally complete! The next step is integration testing and refinement.

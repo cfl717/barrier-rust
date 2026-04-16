@@ -190,22 +190,22 @@ impl BarrierServer {
 }
 ```
 
-## 🔗 与 Phase 3 Tauri GUI 集成
+## 🔗 与 Phase 3 原生双前端 GUI 集成
 
-在 Tauri 命令中调用输入捕获：
+在 原生双前端 命令中调用输入捕获：
 
 ```rust
-// tauri-gui/src-tauri/src/main.rs
+// gui-gtk/src-原生双前端/src/main.rs
 use barrier_input_capture::InputCapture;
 
-#[tauri::command]
+#[原生双前端::command]
 fn inject_key(key_code: u16, pressed: bool) -> Result<(), String> {
     let capture = InputCapture::new().map_err(|e| e.to_string())?;
     capture.inject_keyboard(key_code, pressed)
            .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[原生双前端::command]
 fn inject_mouse_move(dx: i16, dy: i16) -> Result<(), String> {
     let capture = InputCapture::new().map_err(|e| e.to_string())?;
     capture.inject_mouse_move(dx, dy)

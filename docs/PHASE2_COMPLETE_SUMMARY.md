@@ -120,9 +120,9 @@ let capture = InputCapture::new()?;
 capture.inject_keyboard(event.key_code, event.pressed)?;
 ```
 
-### Phase 3 (Tauri GUI)
+### Phase 3 (原生双前端 GUI)
 ```rust
-#[tauri::command]
+#[原生双前端::command]
 fn inject_key(key_code: u16, pressed: bool) -> Result<(), String> {
     let capture = InputCapture::new().map_err(|e| e.to_string())?;
     capture.inject_keyboard(key_code, pressed)
@@ -154,7 +154,7 @@ fn inject_key(key_code: u16, pressed: bool) -> Result<(), String> {
 ## 📝 下一步行动
 
 1. **与 Phase 1 完全集成**: 创建统一的 BarrierServer
-2. **与 Phase 3 完全集成**: 在 Tauri 中调用输入捕获
+2. **与 Phase 3 完全集成**: 在 原生双前端 中调用输入捕获
 3. **端到端测试**: 跨设备键鼠共享测试
 4. **性能基准测试**: 测量延迟和资源占用
 5. **打包发布**: 创建各平台安装包
@@ -170,7 +170,7 @@ fn inject_key(key_code: u16, pressed: bool) -> Result<(), String> {
 
 ✅ Phase 1: 协议层 (2,090 行)  
 ✅ Phase 2: 输入捕获层 (1,466 行)  
-✅ Phase 3: Tauri GUI (已实现)  
+✅ Phase 3: 原生双前端 GUI (已实现)  
 
 **项目总计**: 3,556+ 行 Rust 代码，完整的跨平台键鼠共享框架！
 

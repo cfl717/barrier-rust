@@ -1,8 +1,10 @@
 [workspace]
 members = [
+    "app-core",
+    "app-core-ffi",
+    "gui-gtk",
     "protocol",
     "input-capture",
-    "tauri-gui/src-tauri",
 ]
 resolver = "2"
 
