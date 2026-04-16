@@ -86,6 +86,7 @@ pub struct BarrierServer {
     clients: Arc<Mutex<HashMap<String, ClientSession>>>,
     next_client_id: u64,
     event_tx: mpsc::Sender<ServerEvent>,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// 独立的客户端计数器，可在不锁 BarrierServer 的情况下查询
@@ -145,9 +146,17 @@ impl BarrierServer {
                 clients,
                 next_client_id: 1,
                 event_tx: tx,
+                shutdown_tx: None,
             },
             rx,
         )
+    }
+
+    /// 停止服务器
+    pub fn shutdown(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
     }
 
     /// 获取独立的客户端句柄，可在不锁 server 的情况下查询客户端数量
@@ -158,30 +167,61 @@ impl BarrierServer {
     }
 
     /// Start the server and accept connections
+    /// 注意：此方法会启动后台任务来接受连接，然后立即返回
+    /// 这样 BarrierServer 不会被长期锁定，其他方法（如 send_enter）可以正常调用
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         
         info!("Barrier server listening on {}", addr);
         
-        loop {
-            let (stream, peer_addr) = listener.accept().await?;
-            info!("New connection from {}", peer_addr);
-            
-            let client_id = self.next_client_id;
-            self.next_client_id += 1;
-            
-            let connection = Connection::new(stream, client_id);
-            let clients = Arc::clone(&self.clients);
-            let event_tx = self.event_tx.clone();
-            let config = self.config.clone();
-            
-            tokio::spawn(async move {
-                if let Err(e) = handle_client(connection, peer_addr.to_string(), client_id, clients, event_tx, config).await {
-                    error!("Error handling client {}: {}", client_id, e);
+        let clients = Arc::clone(&self.clients);
+        let event_tx = self.event_tx.clone();
+        let config = self.config.clone();
+        
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        self.shutdown_tx = Some(shutdown_tx);
+        
+        // 在后台任务中运行 accept 循环，这样 run() 可以立即返回
+        tokio::spawn(async move {
+            let mut next_client_id: u64 = 1;
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        info!("Server shutdown requested");
+                        break;
+                    }
+                    result = listener.accept() => {
+                        match result {
+                            Ok((stream, peer_addr)) => {
+                                info!("New connection from {}", peer_addr);
+                                
+                                let client_id = next_client_id;
+                                next_client_id += 1;
+                                
+                                let connection = Connection::new(stream, client_id);
+                                let clients = Arc::clone(&clients);
+                                let event_tx = event_tx.clone();
+                                let config = config.clone();
+                                
+                                tokio::spawn(async move {
+                                    if let Err(e) = handle_client(connection, peer_addr.to_string(), client_id, clients, event_tx, config).await {
+                                        error!("Error handling client {}: {}", client_id, e);
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                error!("Accept error: {}", e);
+                                break;
+                            }
+                        }
+                    }
                 }
-            });
-        }
+            }
+            info!("Server stopped");
+        });
+        
+        Ok(())
     }
 
     /// Get list of connected clients

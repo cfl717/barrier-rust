@@ -262,6 +262,12 @@ impl BarrierCore {
     pub async fn stop_service(&self) -> Result<(), String> {
         let mut guard = self.state.lock().await;
 
+        // 先停止 server 的 accept 循环
+        if let Some(server_arc) = guard.server.take() {
+            let mut server = server_arc.lock().await;
+            server.shutdown();
+        }
+
         if let Some(task) = guard.server_task.take() {
             abort_task_and_wait(task).await;
         }
@@ -269,7 +275,6 @@ impl BarrierCore {
             abort_task_and_wait(task).await;
         }
 
-        guard.server = None;
         guard.clients_handle = None;
         guard.client = None;
         guard.mode = None;
@@ -299,55 +304,59 @@ impl BarrierCore {
             return Err("客户端名称不能为空".to_string());
         }
 
-        // 添加调试日志
+        // 调试日志 - 在获取 server 锁之前
         {
             let mut state_guard = self.state.lock().await;
             append_log(&mut state_guard, format!("[切换] 请求切换到: {}", requested_name));
         }
 
-        let mut switched_to = requested_name.clone();
+        // 获取已连接客户端列表（先释放 server 锁再记录日志）
+        let connected_names: Vec<String>;
         {
             let server = server_arc.lock().await;
             let connected_clients = server.get_clients().await;
-            let connected_names: Vec<String> = connected_clients
+            connected_names = connected_clients
                 .iter()
                 .map(|client| client.screen_name.clone())
                 .collect();
+        }
 
-            // 调试日志：显示已连接客户端
-            {
+        // 日志记录（server 锁已释放）
+        {
+            let mut state_guard = self.state.lock().await;
+            append_log(&mut state_guard, format!("[切换] 已连接客户端: {:?}", connected_names));
+        }
+
+        let mut switched_to = requested_name.clone();
+        if !connected_names.iter().any(|name| name == &requested_name) {
+            if connected_names.len() == 1 {
+                switched_to = connected_names[0].clone();
                 let mut state_guard = self.state.lock().await;
-                append_log(&mut state_guard, format!("[切换] 已连接客户端: {:?}", connected_names));
+                append_log(&mut state_guard, format!("[切换] 名称不匹配，使用首个连接: {}", switched_to));
+            } else if connected_names.is_empty() {
+                return Err("当前没有已连接客户端，请先启动并连接客户端".to_string());
+            } else {
+                return Err(format!(
+                    "目标客户端 `{}` 未连接。当前已连接客户端：{}",
+                    requested_name,
+                    connected_names.join(", ")
+                ));
             }
+        }
 
-            if !connected_names.iter().any(|name| name == &requested_name) {
-                if connected_names.len() == 1 {
-                    switched_to = connected_names[0].clone();
-                    let mut state_guard = self.state.lock().await;
-                    append_log(&mut state_guard, format!("[切换] 名称不匹配，使用首个连接: {}", switched_to));
-                } else if connected_names.is_empty() {
-                    return Err("当前没有已连接客户端，请先启动并连接客户端".to_string());
-                } else {
-                    return Err(format!(
-                        "目标客户端 `{}` 未连接。当前已连接客户端：{}",
-                        requested_name,
-                        connected_names.join(", ")
-                    ));
-                }
-            }
+        // 发送 leave/enter 消息
+        {
+            let mut state_guard = self.state.lock().await;
+            append_log(&mut state_guard, format!("[切换] 发送 CINN 到 {}", switched_to));
+        }
 
+        {
+            let server = server_arc.lock().await;
             if let Some(previous) = previous_active_client.as_ref() {
                 if previous != &switched_to {
                     let _ = server.send_leave(previous).await;
                 }
             }
-            
-            // 调试日志：发送 ENTER
-            {
-                let mut state_guard = self.state.lock().await;
-                append_log(&mut state_guard, format!("[切换] 发送 CINN 到 {}", switched_to));
-            }
-            
             server
                 .send_enter(&switched_to, request.cursor_x, request.cursor_y)
                 .await?;

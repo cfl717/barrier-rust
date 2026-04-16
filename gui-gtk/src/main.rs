@@ -634,14 +634,18 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
     let switch_tx = ui_tx.clone();
     let switch_get_routes = get_routes.clone();
     switch_btn.connect_clicked(move |_| {
+        log::info!("[GUI] 点击切换客户端按钮");
         let routes = switch_get_routes();
+        log::info!("[GUI] 获取到 {} 个路由配置", routes.len());
         let Some(first) = routes.first() else {
+            log::warn!("[GUI] 没有配置客户端映射");
             let tx = switch_tx.clone();
             glib::spawn_future_local(async move {
                 let _ = tx.send(UiMessage::Error("没有配置客户端映射".to_string())).await;
             });
             return;
         };
+        log::info!("[GUI] 尝试切换到: name={}, edge={}", first.name, first.edge.as_str());
         let request = SwitchClientRequest {
             edge: first.edge.as_str().to_string(),
             client_name: first.name.clone(),
@@ -656,11 +660,14 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
         let core = switch_core.clone();
         let tx = switch_tx.clone();
         switch_rt.spawn(async move {
+            log::info!("[GUI] 调用 core.switch_client");
             match core.switch_client(request).await {
                 Ok(msg) => {
+                    log::info!("[GUI] 切换成功: {}", msg);
                     let _ = tx.send(UiMessage::Success(msg)).await;
                 }
                 Err(err) => {
+                    log::error!("[GUI] 切换失败: {}", err);
                     let _ = tx.send(UiMessage::Error(err)).await;
                 }
             }
