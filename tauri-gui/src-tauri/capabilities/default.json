@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Barrier 主窗口：允许 Tauri IPC（含 Vite 开发服务器 http://localhost:1420）。",
+  "windows": ["*"],
+  "webviews": ["*"],
+  "local": true,
+  "permissions": [
+    "core:default"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:1420/*",
+      "http://127.0.0.1:1420/*"
+    ]
+  }
+}

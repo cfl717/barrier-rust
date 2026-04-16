@@ -26,7 +26,11 @@ fn main() -> Result<()> {
     let _ = runtime.block_on(core.restore_on_startup());
 
     let app = adw::Application::builder()
-        .application_id("org.barrier.native.gtk")
+        .application_id(if cfg!(target_os = "macos") {
+            "org.barrier.native.mac"
+        } else {
+            "org.barrier.native.gtk"
+        })
         .build();
 
     let runtime_for_activate = runtime.clone();
@@ -41,7 +45,11 @@ fn main() -> Result<()> {
 fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime>) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Barrier (Ubuntu Native)")
+        .title(if cfg!(target_os = "macos") {
+            "Barrier"
+        } else {
+            "Barrier (Ubuntu Native)"
+        })
         .default_width(800)
         .default_height(600)
         .build();
@@ -56,7 +64,11 @@ fn build_ui(app: &adw::Application, core: Arc<BarrierCore>, runtime: Arc<Runtime
     content.set_margin_start(16);
     content.set_margin_end(16);
 
-    let title = gtk::Label::new(Some("Barrier Ubuntu 原生前端 (GTK4 + libadwaita)"));
+    let title = gtk::Label::new(Some(if cfg!(target_os = "macos") {
+        "Barrier — GTK4 / libadwaita（macOS 上为跨平台壳，非 AppKit）"
+    } else {
+        "Barrier Ubuntu 原生前端 (GTK4 + libadwaita)"
+    }));
     title.add_css_class("title-2");
     title.set_halign(Align::Start);
     content.append(&title);
