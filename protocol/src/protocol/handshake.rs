@@ -77,16 +77,16 @@ where
         });
     }
     
+    // parts[0] = Barrier version, parts[1] = server screen_name
     let result = HandshakeResult {
         app_name: parts[0].to_string(),
-        version: parts[1].to_string(),
-        screen_name: parts.get(2).map(|s| s.to_string()),
+        version: parts[0].to_string(),
+        screen_name: parts.get(1).map(|s| s.to_string()),
     };
     
     log::info!(
-        "Handshake completed: {} {} {:?}",
+        "Handshake completed: {} {:?}",
         result.app_name,
-        result.version,
         result.screen_name
     );
     
@@ -126,10 +126,12 @@ where
         });
     }
     
+    // parts[0] = Barrier version (e.g. "Barrier 1.0")
+    // parts[1] = screen_name
     let client_result = HandshakeResult {
         app_name: parts[0].to_string(),
-        version: parts[1].to_string(),
-        screen_name: parts.get(2).map(|s| s.to_string()),
+        version: parts[0].to_string(),
+        screen_name: parts.get(1).map(|s| s.to_string()),
     };
     
     log::info!(

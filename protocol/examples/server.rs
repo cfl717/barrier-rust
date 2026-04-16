@@ -18,6 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         screen_name: "server".to_string(),
         port: 24800,
         max_clients: 10,
+        listen_address: None,
+        enable_clipboard: true,
+        enable_drag_drop: true,
     };
     
     // Create server instance

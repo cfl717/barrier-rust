@@ -299,6 +299,12 @@ impl BarrierCore {
             return Err("客户端名称不能为空".to_string());
         }
 
+        // 添加调试日志
+        {
+            let mut state_guard = self.state.lock().await;
+            append_log(&mut state_guard, format!("[切换] 请求切换到: {}", requested_name));
+        }
+
         let mut switched_to = requested_name.clone();
         {
             let server = server_arc.lock().await;
@@ -308,9 +314,17 @@ impl BarrierCore {
                 .map(|client| client.screen_name.clone())
                 .collect();
 
+            // 调试日志：显示已连接客户端
+            {
+                let mut state_guard = self.state.lock().await;
+                append_log(&mut state_guard, format!("[切换] 已连接客户端: {:?}", connected_names));
+            }
+
             if !connected_names.iter().any(|name| name == &requested_name) {
                 if connected_names.len() == 1 {
                     switched_to = connected_names[0].clone();
+                    let mut state_guard = self.state.lock().await;
+                    append_log(&mut state_guard, format!("[切换] 名称不匹配，使用首个连接: {}", switched_to));
                 } else if connected_names.is_empty() {
                     return Err("当前没有已连接客户端，请先启动并连接客户端".to_string());
                 } else {
@@ -327,6 +341,13 @@ impl BarrierCore {
                     let _ = server.send_leave(previous).await;
                 }
             }
+            
+            // 调试日志：发送 ENTER
+            {
+                let mut state_guard = self.state.lock().await;
+                append_log(&mut state_guard, format!("[切换] 发送 CINN 到 {}", switched_to));
+            }
+            
             server
                 .send_enter(&switched_to, request.cursor_x, request.cursor_y)
                 .await?;

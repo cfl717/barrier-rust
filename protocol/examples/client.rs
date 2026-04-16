@@ -18,6 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         screen_name: "client-pc".to_string(),
         auto_reconnect: true,
         reconnect_interval: 5,
+        enable_clipboard: true,
+        enable_drag_drop: true,
     };
     
     // Create client instance
