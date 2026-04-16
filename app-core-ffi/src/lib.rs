@@ -1,4 +1,4 @@
-use app_core::{BarrierCore, ClientConfig, ServerConfig};
+use app_core::{BarrierCore, ClientConfig, ServerConfig, SwitchClientRequest};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::Arc;
@@ -157,6 +157,69 @@ pub extern "C" fn barrier_core_get_settings_json(handle: *mut CoreHandle) -> *mu
     let payload = serde_json::to_string(&core_handle.runtime.block_on(core_handle.core.get_settings()))
         .unwrap_or_else(|e| format!(r#"{{"error":"配置序列化失败: {}"}}"#, e));
     to_c_string(payload)
+}
+
+#[no_mangle]
+pub extern "C" fn barrier_core_switch_client(
+    handle: *mut CoreHandle,
+    client_name: *const c_char,
+    edge: *const c_char,
+) -> *mut c_char {
+    if handle.is_null() {
+        return to_c_string("core handle 为空".to_string());
+    }
+    let client_name = match read_cstr(client_name, "client_name") {
+        Ok(v) => v,
+        Err(err) => return to_c_string(err),
+    };
+    let edge = read_cstr(edge, "edge").unwrap_or_else(|_| "right".to_string());
+    let request = SwitchClientRequest {
+        client_name,
+        edge,
+        client_address: None,
+        cursor_x: 0,
+        cursor_y: 0,
+    };
+    let core_handle = unsafe { &mut *handle };
+    let result = core_handle.runtime.block_on(core_handle.core.switch_client(request));
+    match result {
+        Ok(msg) => to_c_string(format!("OK:{}", msg)),
+        Err(err) => to_c_string(err),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn barrier_core_switch_back(handle: *mut CoreHandle) -> *mut c_char {
+    if handle.is_null() {
+        return to_c_string("core handle 为空".to_string());
+    }
+    let core_handle = unsafe { &mut *handle };
+    let result = core_handle.runtime.block_on(core_handle.core.switch_back_local("manual".to_string()));
+    match result {
+        Ok(msg) => to_c_string(format!("OK:{}", msg)),
+        Err(err) => to_c_string(err),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn barrier_core_save_settings_json(
+    handle: *mut CoreHandle,
+    json: *const c_char,
+) -> *mut c_char {
+    if handle.is_null() {
+        return to_c_string("core handle 为空".to_string());
+    }
+    let json_str = match read_cstr(json, "json") {
+        Ok(v) => v,
+        Err(err) => return to_c_string(err),
+    };
+    let settings: app_core::AppSettings = match serde_json::from_str(&json_str) {
+        Ok(s) => s,
+        Err(e) => return to_c_string(format!("配置解析失败: {}", e)),
+    };
+    let core_handle = unsafe { &mut *handle };
+    let result = core_handle.runtime.block_on(core_handle.core.save_settings(settings));
+    result_to_error_ptr(result)
 }
 
 #[no_mangle]

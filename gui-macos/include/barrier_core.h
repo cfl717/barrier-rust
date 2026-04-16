@@ -21,6 +21,9 @@ char* barrier_core_start_client(
 char* barrier_core_stop(BarrierCoreHandle handle);
 char* barrier_core_get_status_json(BarrierCoreHandle handle);
 char* barrier_core_get_settings_json(BarrierCoreHandle handle);
+char* barrier_core_switch_client(BarrierCoreHandle handle, const char* client_name, const char* edge);
+char* barrier_core_switch_back(BarrierCoreHandle handle);
+char* barrier_core_save_settings_json(BarrierCoreHandle handle, const char* json);
 
 void barrier_core_free_string(char* value);
 
