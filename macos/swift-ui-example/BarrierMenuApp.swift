@@ -114,8 +114,9 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
         }
-        .padding()
-        .frame(minWidth: 400, minHeight: 300)
+        .padding(20)
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             core = barrier_core_new()
             refreshStatus()
