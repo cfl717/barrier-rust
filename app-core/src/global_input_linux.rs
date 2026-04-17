@@ -1,5 +1,9 @@
 //! Linux + X11：通过 rdev 监听全局键鼠，在「服务端已选中的远程客户端」激活时转发到协议层。
 //! rdev 在 Linux 上使用 XRecord，需 DISPLAY；与 Wayland 会话不兼容。
+//! 
+//! 支持功能：
+//! - 边缘自动切换：鼠标到达屏幕边缘时自动切换到对应客户端
+//! - 输入转发：激活客户端后将键鼠事件转发到远程
 
 use crate::core::BarrierRuntimeState;
 use barrier_protocol::BarrierServer;
@@ -11,13 +15,14 @@ use tokio::sync::{mpsc, Mutex};
 
 #[derive(Debug, Clone)]
 enum GlobalInputEvent {
-    MouseMove(i16, i16),
+    MouseMove(i16, i16, f64, f64), // dx, dy, abs_x, abs_y
     MouseButton(u8, bool),
     Key(u16, bool),
 }
 
 const MOVE_FLUSH_INTERVAL: Duration = Duration::from_millis(8);
 const MOVE_BURST_FLUSH: i32 = 96;
+const EDGE_THRESHOLD: f64 = 2.0; // 距离边缘多少像素触发切换
 
 pub(crate) fn start_global_input_pipeline(state: Arc<Mutex<BarrierRuntimeState>>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<GlobalInputEvent>();
@@ -30,7 +35,7 @@ pub(crate) fn start_global_input_pipeline(state: Arc<Mutex<BarrierRuntimeState>>
                     let dx = (x - lx).round() as i16;
                     let dy = (y - ly).round() as i16;
                     if dx != 0 || dy != 0 {
-                        let _ = tx.send(GlobalInputEvent::MouseMove(dx, dy));
+                        let _ = tx.send(GlobalInputEvent::MouseMove(dx, dy, x, y));
                     }
                 }
                 last_pos = Some((x, y));
@@ -103,19 +108,62 @@ pub(crate) fn start_global_input_pipeline(state: Arc<Mutex<BarrierRuntimeState>>
                     *last_flush = Instant::now();
                 }
 
+                // 获取屏幕尺寸用于边缘检测
+                let screen_size = get_screen_size();
+                log::info!("Screen size for edge detection: {:?}", screen_size);
+
                 while let Some(event) = rx.recv().await {
-                    let (server_arc, active_client) = {
+                    let (server_arc, active_client, client_routes) = {
                         let state_guard = state.lock().await;
-                        (state_guard.server.clone(), state_guard.active_client.clone())
+                        (
+                            state_guard.server.clone(),
+                            state_guard.active_client.clone(),
+                            state_guard.settings.client_routes.clone(),
+                        )
                     };
-                    let (Some(server_arc), Some(active_client)) = (server_arc, active_client) else {
+
+                    // 如果没有 server 运行，跳过
+                    let Some(server_arc) = server_arc else {
+                        acc_dx = 0;
+                        acc_dy = 0;
+                        continue;
+                    };
+
+                    // 处理边缘检测和自动切换
+                    if let GlobalInputEvent::MouseMove(_, _, abs_x, abs_y) = &event {
+                        if active_client.is_none() {
+                            // 当前在本机，检测是否到达边缘
+                            if let Some((width, height)) = screen_size {
+                                let edge = detect_edge(*abs_x, *abs_y, width, height);
+                                if let Some(edge_name) = edge {
+                                    // 查找对应边缘的客户端
+                                    if let Some(route) = client_routes.iter().find(|r| r.edge.as_str() == edge_name) {
+                                        log::info!("Edge detected: {} -> switching to {}", edge_name, route.name);
+                                        // 触发切换
+                                        let mut state_guard = state.lock().await;
+                                        state_guard.active_client = Some(route.name.clone());
+                                        // 发送 ENTER
+                                        let server = server_arc.lock().await;
+                                        if let Err(e) = server.send_enter(&route.name, 0, 0).await {
+                                            log::warn!("Failed to send enter on edge switch: {}", e);
+                                        }
+                                        drop(server);
+                                        crate::core::append_log(&mut state_guard, format!("边缘切换: {} -> {}", edge_name, route.name));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 如果没有激活的客户端，不转发输入
+                    let Some(active_client) = active_client else {
                         acc_dx = 0;
                         acc_dy = 0;
                         continue;
                     };
 
                     match event {
-                        GlobalInputEvent::MouseMove(dx, dy) => {
+                        GlobalInputEvent::MouseMove(dx, dy, _, _) => {
                             acc_dx += dx as i32;
                             acc_dy += dy as i32;
                             let burst =
@@ -149,7 +197,7 @@ pub(crate) fn start_global_input_pipeline(state: Arc<Mutex<BarrierRuntimeState>>
                                 GlobalInputEvent::Key(key_code, pressed) => {
                                     server.relay_key_event(&active_client, key_code, pressed).await
                                 }
-                                GlobalInputEvent::MouseMove(_, _) => unreachable!(),
+                                GlobalInputEvent::MouseMove(_, _, _, _) => unreachable!(),
                             };
                             if let Err(err) = relay_result {
                                 log::warn!("Global input relay failed: {}", err);
@@ -170,6 +218,46 @@ fn map_button(button: Button) -> Option<u8> {
         Button::Right => Some(2),
         Button::Middle => Some(3),
         _ => None,
+    }
+}
+
+/// 获取屏幕尺寸
+fn get_screen_size() -> Option<(f64, f64)> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::ptr;
+        use x11::xlib::{XCloseDisplay, XDefaultScreen, XDisplayHeight, XDisplayWidth, XOpenDisplay};
+        
+        unsafe {
+            let display = XOpenDisplay(ptr::null());
+            if display.is_null() {
+                return None;
+            }
+            let screen = XDefaultScreen(display);
+            let width = XDisplayWidth(display, screen);
+            let height = XDisplayHeight(display, screen);
+            XCloseDisplay(display);
+            Some((width as f64, height as f64))
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// 检测鼠标是否到达屏幕边缘，返回边缘方向
+fn detect_edge(x: f64, y: f64, screen_width: f64, screen_height: f64) -> Option<&'static str> {
+    if x <= EDGE_THRESHOLD {
+        Some("left")
+    } else if x >= screen_width - EDGE_THRESHOLD {
+        Some("right")
+    } else if y <= EDGE_THRESHOLD {
+        Some("top")
+    } else if y >= screen_height - EDGE_THRESHOLD {
+        Some("bottom")
+    } else {
+        None
     }
 }
 

@@ -41,10 +41,10 @@ pub(crate) struct BarrierRuntimeState {
     mode: Option<String>,
     server_address: String,
     last_error: Option<String>,
-    log_messages: Vec<String>,
+    pub(crate) log_messages: Vec<String>,
     pub(crate) active_client: Option<String>,
     pointer_locked: bool,
-    settings: AppSettings,
+    pub(crate) settings: AppSettings,
 }
 
 impl BarrierCore {
@@ -621,7 +621,7 @@ impl BarrierRuntimeState {
     }
 }
 
-fn append_log(state: &mut BarrierRuntimeState, message: String) {
+pub(crate) fn append_log(state: &mut BarrierRuntimeState, message: String) {
     state.log_messages.push(message);
     if state.log_messages.len() > 200 {
         let overflow = state.log_messages.len() - 200;
