@@ -13,3 +13,4 @@ crate-type = ["cdylib", "staticlib"]
 app-core = { path = "../app-core" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+env_logger = { workspace = true }

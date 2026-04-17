@@ -2,11 +2,23 @@ use app_core::{BarrierCore, ClientConfig, ServerConfig, SwitchClientRequest};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::Arc;
+use std::sync::Once;
 use tokio::runtime::Runtime;
 
 pub struct CoreHandle {
     runtime: Runtime,
     core: Arc<BarrierCore>,
+}
+
+static LOGGER_INIT: Once = Once::new();
+
+fn init_logger_once() {
+    LOGGER_INIT.call_once(|| {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info"),
+        )
+        .try_init();
+    });
 }
 
 fn read_cstr(input: *const c_char, field: &str) -> Result<String, String> {
@@ -38,7 +50,13 @@ fn result_to_error_ptr(result: Result<(), String>) -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn barrier_core_new() -> *mut CoreHandle {
-    let runtime = match Runtime::new() {
+    init_logger_once();
+
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(_) => return std::ptr::null_mut(),
     };

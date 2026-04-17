@@ -7,6 +7,7 @@
 //
 // 下列声明等价于 Bridging Header 导入 barrier_core_ffi.h
 
+import AppKit
 import SwiftUI
 
 @_silgen_name("barrier_core_new")
@@ -39,6 +40,15 @@ struct BarrierMenuApp: App {
     }
 }
 
+private struct CoreStatusSnapshot: Decodable {
+    let mode: String
+    let is_running: Bool
+    let connected_clients: Int
+    let server_address: String
+    let active_client: String?
+    let log_messages: [String]
+}
+
 struct ContentView: View {
     @State private var isServerMode: Bool = true
     @State private var port: String = "24800"
@@ -46,80 +56,108 @@ struct ContentView: View {
     @State private var serverAddr: String = "192.168.5.5:24800"
     @State private var clientName: String = "client-1"
     @State private var status: String = "未连接核心"
+    @State private var statusSummary: String = "等待连接"
+    @State private var logs: [String] = []
+    @State private var autoRefreshEnabled: Bool = true
+    private let refreshTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
     @State private var core: OpaquePointer?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Barrier（macOS 原生壳示例）")
-                .font(.title2)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Barrier（macOS 原生客户端）")
+                .font(.title3)
                 .bold()
 
             Picker("运行模式", selection: $isServerMode) {
-                Text("服务端 (Server)").tag(true)
-                Text("客户端 (Client)").tag(false)
+                Text("服务端").tag(true)
+                Text("客户端").tag(false)
             }
-            .pickerStyle(SegmentedPickerStyle())
+            .pickerStyle(.segmented)
 
-            Divider()
-
-            if isServerMode {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("监听端口:")
-                            .frame(width: 80, alignment: .trailing)
-                        TextField("例如 24800", text: $port)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(width: 100)
+            GroupBox("连接配置") {
+                VStack(alignment: .leading, spacing: 10) {
+                    if isServerMode {
+                        HStack {
+                            Text("监听端口")
+                                .frame(width: 84, alignment: .trailing)
+                            TextField("24800", text: $port)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 120)
+                            Text("屏幕名称")
+                                .frame(width: 84, alignment: .trailing)
+                            TextField("server", text: $screenName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        Button("启动 Server") { startServer() }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        HStack {
+                            Text("服务端地址")
+                                .frame(width: 84, alignment: .trailing)
+                            TextField("192.168.5.5:24800", text: $serverAddr)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        HStack {
+                            Text("客户端名称")
+                                .frame(width: 84, alignment: .trailing)
+                            TextField("client-1", text: $clientName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        Button("启动 Client") { startClient() }
+                            .buttonStyle(.borderedProminent)
                     }
-                    HStack {
-                        Text("屏幕名称:")
-                            .frame(width: 80, alignment: .trailing)
-                        TextField("例如 server", text: $screenName)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                    }
-                    Button("启动 Server") { startServer() }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.top, 8)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("服务端 IP:")
-                            .frame(width: 80, alignment: .trailing)
-                        TextField("例如 192.168.5.5:24800", text: $serverAddr)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                    }
-                    HStack {
-                        Text("客户端名称:")
-                            .frame(width: 80, alignment: .trailing)
-                        TextField("例如 client-1", text: $clientName)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                    }
-                    Button("启动 Client") { startClient() }
-                        .buttonStyle(.borderedProminent)
-                        .padding(.top, 8)
-                }
+                .padding(.top, 4)
             }
 
-            Divider()
+            GroupBox("运行状态") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(statusSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(status)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+            }
+
+            GroupBox("客户端诊断日志") {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.caption.monospaced())
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(minHeight: 170)
+            }
 
             HStack {
                 Button("停止运行") { stopCore() }
-                Spacer()
                 Button("刷新状态") { refreshStatus() }
+                Toggle("自动刷新", isOn: $autoRefreshEnabled)
+                    .toggleStyle(.checkbox)
+                Spacer()
+                Button("复制诊断") { copyDiagnostics() }
             }
-
-            Text(status)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
         }
-        .padding(20)
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(16)
+        .frame(minWidth: 640, minHeight: 560)
         .onAppear {
             core = barrier_core_new()
             refreshStatus()
+        }
+        .onReceive(refreshTimer) { _ in
+            if autoRefreshEnabled {
+                refreshStatus()
+            }
         }
         .onDisappear {
             if let h = core {
@@ -135,6 +173,7 @@ struct ContentView: View {
         let s = String(cString: json)
         barrier_core_free_string(json)
         status = s
+        updateStatusSummaryAndLogs(from: s)
     }
 
     private func startServer() {
@@ -178,5 +217,36 @@ struct ContentView: View {
         } else {
             refreshStatus()
         }
+    }
+
+    private func updateStatusSummaryAndLogs(from raw: String) {
+        guard let data = raw.data(using: .utf8) else {
+            statusSummary = "状态解析失败：非 UTF-8"
+            return
+        }
+        do {
+            let decoded = try JSONDecoder().decode(CoreStatusSnapshot.self, from: data)
+            let active = decoded.active_client ?? "-"
+            statusSummary = "mode=\(decoded.mode) | running=\(decoded.is_running) | clients=\(decoded.connected_clients) | active=\(active) | server=\(decoded.server_address)"
+            logs = decoded.log_messages
+        } catch {
+            statusSummary = "状态解析失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func copyDiagnostics() {
+        let content = """
+        ===== Barrier Diagnostics =====
+        \(statusSummary)
+
+        ---- Raw Status JSON ----
+        \(status)
+
+        ---- Log Messages ----
+        \(logs.joined(separator: "\n"))
+        """
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content, forType: .string)
     }
 }

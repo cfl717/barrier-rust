@@ -3,6 +3,9 @@ set -e
 
 # 切换到脚本所在目录
 cd "$(dirname "$0")"
+ROOT_DIR="$(cd .. && pwd)"
+TARGET_DIR="$ROOT_DIR/target"
+export CARGO_TARGET_DIR="$TARGET_DIR"
 
 echo "1. 编译 Rust 核心动态库 (libbarrier_core_ffi.dylib)..."
 cd ../app-core-ffi
@@ -25,12 +28,12 @@ echo "3. 编译 Swift UI 代码..."
 # 使用 swiftc 编译，指定头文件和链接库
 swiftc -parse-as-library swift-ui-example/BarrierMenuApp.swift \
     -import-objc-header ../app-core-ffi/include/barrier_core_ffi.h \
-    -L ../target/debug \
+    -L "$TARGET_DIR/debug" \
     -lbarrier_core_ffi \
     -o "$MACOS_DIR/Barrier"
 
 echo "4. 拷贝动态库并修复 rpath..."
-cp ../target/debug/libbarrier_core_ffi.dylib "$FRAMEWORKS_DIR/"
+cp "$TARGET_DIR/debug/libbarrier_core_ffi.dylib" "$FRAMEWORKS_DIR/"
 
 # 让可执行文件能在 Frameworks 目录下找到 dylib
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS_DIR/Barrier"

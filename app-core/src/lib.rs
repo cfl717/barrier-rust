@@ -1,6 +1,8 @@
 mod core;
 #[cfg(target_os = "linux")]
 mod global_input_linux;
+#[cfg(target_os = "linux")]
+mod pointer_lock_linux;
 mod settings;
 mod types;
 

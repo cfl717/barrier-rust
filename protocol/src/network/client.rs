@@ -11,6 +11,7 @@ use log::{error, info, warn};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::UnboundedSender;
 
 /// Client configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -75,6 +76,11 @@ pub enum ClientState {
     Error(String),
 }
 
+#[derive(Debug, Clone)]
+pub enum ClientRuntimeEvent {
+    Log(String),
+}
+
 /// Barrier client
 pub struct BarrierClient {
     config: ClientConfig,
@@ -83,6 +89,7 @@ pub struct BarrierClient {
     read_half: Option<OwnedReadHalf>,
     write_half: Option<OwnedWriteHalf>,
     handshake_result: Option<HandshakeResult>,
+    event_tx: Option<UnboundedSender<ClientRuntimeEvent>>,
 }
 
 impl BarrierClient {
@@ -95,7 +102,12 @@ impl BarrierClient {
             read_half: None,
             write_half: None,
             handshake_result: None,
+            event_tx: None,
         }
+    }
+
+    pub fn set_event_sender(&mut self, sender: UnboundedSender<ClientRuntimeEvent>) {
+        self.event_tx = Some(sender);
     }
 
     /// Get current state
@@ -113,20 +125,24 @@ impl BarrierClient {
         self.state = ClientState::Connecting;
         
         info!("Connecting to server at {}", self.config.server_addr);
+        self.emit_runtime_log(format!("正在连接服务端 {}", self.config.server_addr));
         
         // Connect to server
         let stream = match TcpStream::connect(&self.config.server_addr).await {
             Ok(stream) => stream,
             Err(e) => {
                 self.state = ClientState::Error(format!("Connection failed: {}", e));
+                self.emit_runtime_log(format!("连接失败: {}", e));
                 return Err(ProtocolError::Io(e));
             }
         };
         
         info!("TCP connection established");
+        self.emit_runtime_log("TCP 连接已建立");
         
         // Perform handshake on owned halves, and keep them after handshake.
         self.state = ClientState::Authenticating;
+        self.emit_runtime_log("开始握手（CBYQ/QBYC）");
         let (mut read_half, mut write_half) = stream.into_split();
         
         let handshake_result = match client_handshake(
@@ -137,11 +153,20 @@ impl BarrierClient {
             Ok(result) => result,
             Err(e) => {
                 self.state = ClientState::Error(format!("Handshake failed: {}", e));
+                self.emit_runtime_log(format!("握手失败: {}", e));
                 return Err(e);
             }
         };
         
         info!("Handshake completed: {:?}", handshake_result);
+        self.emit_runtime_log(format!(
+            "握手成功: app={} screen={}",
+            handshake_result.app_name,
+            handshake_result
+                .screen_name
+                .clone()
+                .unwrap_or_else(|| "-".to_string())
+        ));
         
         // Recreate connection from stream (need to handle this better)
         // Keep halves alive so the TCP session remains connected.
@@ -227,7 +252,10 @@ impl BarrierClient {
             match self.connect().await {
                 Ok(_) => {
                     info!("Successfully connected to server");
+                    self.emit_runtime_log("已连接服务端，等待输入焦点切换消息");
                     let mut input_enabled = false;
+                    let mut ignored_input_packets: u64 = 0;
+                    let mut injected_packets: u64 = 0;
 
                     // Basic message processing loop for screen-switch signals.
                     loop {
@@ -235,14 +263,39 @@ impl BarrierClient {
                             Ok(msg) => {
                                 if msg.msg_type == message_types::CLIENT_ENTER {
                                     input_enabled = true;
+                                    injected_packets = 0;
                                     info!("Received CINN: input focus entered this client");
+                                    self.emit_runtime_log("收到 CINN：输入焦点已切换到当前客户端");
                                 } else if msg.msg_type == message_types::CLIENT_LEAVE {
                                     input_enabled = false;
                                     info!("Received COUT: input focus left this client");
+                                    self.emit_runtime_log("收到 COUT：输入焦点已切回服务端");
+                                } else if !input_enabled
+                                    && (msg.msg_type == message_types::MOUSE_MOVE
+                                        || msg.msg_type == message_types::MOUSE_BUTTON
+                                        || msg.msg_type == message_types::KEY_DOWN
+                                        || msg.msg_type == message_types::KEY_UP)
+                                {
+                                    ignored_input_packets += 1;
+                                    if ignored_input_packets <= 5 || ignored_input_packets % 100 == 0 {
+                                        self.emit_runtime_log(format!(
+                                            "未激活状态，忽略输入消息 {}（累计 {}）",
+                                            msg.msg_type, ignored_input_packets
+                                        ));
+                                    }
                                 } else if input_enabled && msg.msg_type == message_types::MOUSE_MOVE {
                                     if let Ok(event) = MouseMoveEvent::from_message(&msg) {
                                         if let Err(e) = inject_mouse_move(event.dx, event.dy) {
                                             warn!("Inject mouse move failed: {}", e);
+                                            self.emit_runtime_log(format!("鼠标移动注入失败: {}", e));
+                                        } else {
+                                            injected_packets += 1;
+                                            if injected_packets <= 5 || injected_packets % 50 == 0 {
+                                                self.emit_runtime_log(format!(
+                                                    "已注入鼠标移动（累计 {}）",
+                                                    injected_packets
+                                                ));
+                                            }
                                         }
                                     }
                                 } else if input_enabled
@@ -252,6 +305,15 @@ impl BarrierClient {
                                     if let Ok(event) = KeyEvent::from_message(&msg) {
                                         if let Err(e) = inject_key(event.key_code, event.pressed) {
                                             warn!("Inject key event failed: {}", e);
+                                            self.emit_runtime_log(format!("键盘注入失败: {}", e));
+                                        } else {
+                                            injected_packets += 1;
+                                            if injected_packets <= 5 || injected_packets % 50 == 0 {
+                                                self.emit_runtime_log(format!(
+                                                    "已注入键盘事件（累计 {}）",
+                                                    injected_packets
+                                                ));
+                                            }
                                         }
                                     }
                                 } else if input_enabled && msg.msg_type == message_types::MOUSE_BUTTON {
@@ -259,6 +321,15 @@ impl BarrierClient {
                                         let button_code = event.button as u8;
                                         if let Err(e) = inject_mouse_button(button_code, event.pressed) {
                                             warn!("Inject mouse button failed: {}", e);
+                                            self.emit_runtime_log(format!("鼠标按键注入失败: {}", e));
+                                        } else {
+                                            injected_packets += 1;
+                                            if injected_packets <= 5 || injected_packets % 50 == 0 {
+                                                self.emit_runtime_log(format!(
+                                                    "已注入鼠标按键（累计 {}）",
+                                                    injected_packets
+                                                ));
+                                            }
                                         }
                                     }
                                 } else {
@@ -267,6 +338,7 @@ impl BarrierClient {
                             }
                             Err(e) => {
                                 warn!("Receive error, disconnecting: {}", e);
+                                self.emit_runtime_log(format!("接收消息失败，准备断开并重连: {}", e));
                                 self.disconnect().await;
                                 break;
                             }
@@ -275,6 +347,7 @@ impl BarrierClient {
                 }
                 Err(e) => {
                     error!("Connection error: {}", e);
+                    self.emit_runtime_log(format!("连接流程异常: {}", e));
                     
                     if !self.config.auto_reconnect {
                         return Err(Box::new(e));
@@ -284,12 +357,22 @@ impl BarrierClient {
                         "Reconnecting in {} seconds...",
                         self.config.reconnect_interval
                     );
+                    self.emit_runtime_log(format!(
+                        "{} 秒后重连",
+                        self.config.reconnect_interval
+                    ));
                     tokio::time::sleep(tokio::time::Duration::from_secs(
                         self.config.reconnect_interval,
                     ))
                     .await;
                 }
             }
+        }
+    }
+
+    fn emit_runtime_log<S: Into<String>>(&self, message: S) {
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientRuntimeEvent::Log(message.into()));
         }
     }
 }

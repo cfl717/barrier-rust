@@ -1,21 +1,28 @@
 use crate::settings::SettingsStore;
 use crate::types::{AppSettings, AppState, CoreEvent, RuntimeCapabilities, SwitchClientRequest};
-use barrier_protocol::{BarrierClient, BarrierServer, ClientConfig, ClientsHandle, ServerConfig};
+use barrier_protocol::{
+    BarrierClient, BarrierServer, ClientConfig, ClientRuntimeEvent, ClientsHandle, ServerConfig,
+};
 use std::env;
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 #[cfg(target_os = "linux")]
-use crate::global_input_linux::start_global_input_pipeline;
+use crate::{global_input_linux::start_global_input_pipeline, pointer_lock_linux::set_pointer_lock};
 
 #[cfg(not(target_os = "linux"))]
 fn start_global_input_pipeline(_state: Arc<Mutex<BarrierRuntimeState>>) {}
+
+#[cfg(not(target_os = "linux"))]
+fn set_pointer_lock(_enabled: bool) -> Result<(), String> {
+    Ok(())
+}
 
 pub struct BarrierCore {
     state: Arc<Mutex<BarrierRuntimeState>>,
@@ -36,6 +43,7 @@ pub(crate) struct BarrierRuntimeState {
     last_error: Option<String>,
     log_messages: Vec<String>,
     pub(crate) active_client: Option<String>,
+    pointer_locked: bool,
     settings: AppSettings,
 }
 
@@ -59,6 +67,7 @@ impl BarrierCore {
                 last_error: None,
                 log_messages: vec!["应用启动".to_string()],
                 active_client: None,
+                pointer_locked: false,
                 settings,
             })),
             event_tx,
@@ -157,6 +166,7 @@ impl BarrierCore {
         if let Some(task) = guard.server_task.take() {
             abort_task_and_wait(task).await;
         }
+        apply_pointer_lock(&mut guard, false, "start_server");
 
         let port = parse_port_from_server_config(&config);
         let bind_addr = format!("0.0.0.0:{port}");
@@ -217,13 +227,16 @@ impl BarrierCore {
         if let Some(task) = guard.client_task.take() {
             abort_task_and_wait(task).await;
         }
+        apply_pointer_lock(&mut guard, false, "start_client");
 
         let target_server = config.server_addr.clone();
         TcpStream::connect(&target_server)
             .await
             .map_err(|e| format!("无法连接服务端（{}）: {}", target_server, e))?;
 
-        let client = BarrierClient::new(config.clone());
+        let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel::<ClientRuntimeEvent>();
+        let mut client = BarrierClient::new(config.clone());
+        client.set_event_sender(client_event_tx);
         let client_arc = Arc::new(Mutex::new(client));
         guard.client = Some(client_arc.clone());
         guard.mode = Some("client".to_string());
@@ -240,19 +253,69 @@ impl BarrierCore {
         }
 
         let task = tokio::spawn(async move {
-            let mut client = client_arc.lock().await;
-            if let Err(e) = client.run().await {
-                log::error!("Client error: {}", e);
-                let mut state = state_handle.lock().await;
-                state.last_error = Some(format!("Client error: {}", e));
-                append_log(&mut state, format!("Client error: {}", e));
-                let _ = event_tx.send(CoreEvent::Error(format!("Client error: {}", e)));
-                let snapshot = state.to_app_state(0);
+            {
+                let snapshot = {
+                    let mut state = state_handle.lock().await;
+                    append_log(&mut state, "[client-task] 已启动后台任务".to_string());
+                    state.to_app_state(0)
+                };
                 let _ = event_tx.send(CoreEvent::Status(snapshot));
+            }
+
+            let run_fut = async {
+                {
+                    let snapshot = {
+                        let mut state = state_handle.lock().await;
+                        append_log(&mut state, "[client-task] 即将进入 client.run()".to_string());
+                        state.to_app_state(0)
+                    };
+                    let _ = event_tx.send(CoreEvent::Status(snapshot));
+                }
+                let mut client = client_arc.lock().await;
+                client.run().await
+            };
+            tokio::pin!(run_fut);
+
+            loop {
+                tokio::select! {
+                    event = client_event_rx.recv() => {
+                        match event {
+                            Some(ClientRuntimeEvent::Log(message)) => {
+                                let snapshot = {
+                                    let mut state = state_handle.lock().await;
+                                    append_log(&mut state, format!("[client] {}", message));
+                                    state.to_app_state(0)
+                                };
+                                let _ = event_tx.send(CoreEvent::Status(snapshot));
+                            }
+                            None => break,
+                        }
+                    }
+                    run_result = &mut run_fut => {
+                        if let Err(e) = run_result {
+                            log::error!("Client error: {}", e);
+                            let mut state = state_handle.lock().await;
+                            state.last_error = Some(format!("Client error: {}", e));
+                            append_log(&mut state, format!("Client error: {}", e));
+                            let _ = event_tx.send(CoreEvent::Error(format!("Client error: {}", e)));
+                            let snapshot = state.to_app_state(0);
+                            let _ = event_tx.send(CoreEvent::Status(snapshot));
+                        } else {
+                            let snapshot = {
+                                let mut state = state_handle.lock().await;
+                                append_log(&mut state, "[client-task] client.run() 正常退出".to_string());
+                                state.to_app_state(0)
+                            };
+                            let _ = event_tx.send(CoreEvent::Status(snapshot));
+                        }
+                        break;
+                    }
+                }
             }
         });
         guard.client_task = Some(task);
         append_log(&mut guard, "Client 已连接，等待 Server 激活输入…".to_string());
+        append_log(&mut guard, "Client task spawned".to_string());
 
         drop(guard);
         self.broadcast_status().await;
@@ -274,6 +337,7 @@ impl BarrierCore {
         if let Some(task) = guard.client_task.take() {
             abort_task_and_wait(task).await;
         }
+        apply_pointer_lock(&mut guard, false, "stop_service");
 
         guard.clients_handle = None;
         guard.client = None;
@@ -375,6 +439,11 @@ impl BarrierCore {
         let mut state_guard = self.state.lock().await;
         state_guard.active_client = Some(switched_to);
         state_guard.last_error = None;
+        if state_guard.settings.pointer_lock_enabled {
+            apply_pointer_lock(&mut state_guard, true, "switch_client");
+        } else {
+            apply_pointer_lock(&mut state_guard, false, "switch_client_disabled");
+        }
         append_log(&mut state_guard, message.clone());
 
         drop(state_guard);
@@ -403,6 +472,7 @@ impl BarrierCore {
         let message = format!("Edge return [{}] -> local ({})", edge, active);
         let mut state_guard = self.state.lock().await;
         state_guard.active_client = None;
+        apply_pointer_lock(&mut state_guard, false, "switch_back_local");
         append_log(&mut state_guard, message.clone());
 
         drop(state_guard);
@@ -556,6 +626,36 @@ fn append_log(state: &mut BarrierRuntimeState, message: String) {
     if state.log_messages.len() > 200 {
         let overflow = state.log_messages.len() - 200;
         state.log_messages.drain(0..overflow);
+    }
+}
+
+fn apply_pointer_lock(state: &mut BarrierRuntimeState, enabled: bool, reason: &str) {
+    if state.pointer_locked == enabled {
+        return;
+    }
+    match set_pointer_lock(enabled) {
+        Ok(()) => {
+            state.pointer_locked = enabled;
+            append_log(
+                state,
+                format!(
+                    "X11 指针{}（{}）",
+                    if enabled { "已锁定并隐藏" } else { "已恢复显示" },
+                    reason
+                ),
+            );
+        }
+        Err(err) => {
+            append_log(
+                state,
+                format!(
+                    "X11 指针{}失败（{}）: {}",
+                    if enabled { "锁定" } else { "恢复" },
+                    reason,
+                    err
+                ),
+            );
+        }
     }
 }
 

@@ -5,6 +5,13 @@
 use super::{PlatformError, PlatformInput};
 use std::ffi::CString;
 
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> u8;
+    fn CGWarpMouseCursorPosition(newCursorPosition: core_graphics::geometry::CGPoint) -> i32;
+}
+
 /// macOS input handler
 pub struct MacOsInput {
     initialized: bool,
@@ -20,10 +27,130 @@ fn barrier_button_to_cg(button: u8) -> i32 {
     }
 }
 
+// Convert X11 keycodes (sent by current Linux server path) to macOS CGKeyCode.
+fn x11_keycode_to_macos(key_code: u16) -> u16 {
+    match key_code {
+        9 => 53,   // Escape
+        10 => 18,  // 1
+        11 => 19,  // 2
+        12 => 20,  // 3
+        13 => 21,  // 4
+        14 => 23,  // 5
+        15 => 22,  // 6
+        16 => 26,  // 7
+        17 => 28,  // 8
+        18 => 25,  // 9
+        19 => 29,  // 0
+        20 => 27,  // -
+        21 => 24,  // =
+        22 => 51,  // Backspace
+        23 => 48,  // Tab
+        24 => 12,  // Q
+        25 => 13,  // W
+        26 => 14,  // E
+        27 => 15,  // R
+        28 => 17,  // T
+        29 => 16,  // Y
+        30 => 32,  // U
+        31 => 34,  // I
+        32 => 31,  // O
+        33 => 35,  // P
+        34 => 33,  // [
+        35 => 30,  // ]
+        36 => 36,  // Return
+        37 => 59,  // Left Control
+        38 => 0,   // A
+        39 => 1,   // S
+        40 => 2,   // D
+        41 => 3,   // F
+        42 => 5,   // G
+        43 => 4,   // H
+        44 => 38,  // J
+        45 => 40,  // K
+        46 => 37,  // L
+        47 => 41,  // ;
+        48 => 39,  // '
+        49 => 50,  // `
+        50 => 56,  // Left Shift
+        51 => 42,  // \
+        52 => 6,   // Z
+        53 => 7,   // X
+        54 => 8,   // C
+        55 => 9,   // V
+        56 => 11,  // B
+        57 => 45,  // N
+        58 => 46,  // M
+        59 => 43,  // ,
+        60 => 47,  // .
+        61 => 44,  // /
+        62 => 60,  // Right Shift
+        63 => 67,  // Keypad *
+        64 => 58,  // Left Option (Alt)
+        65 => 49,  // Space
+        66 => 57,  // CapsLock
+        67 => 122, // F1
+        68 => 120, // F2
+        69 => 99,  // F3
+        70 => 118, // F4
+        71 => 96,  // F5
+        72 => 97,  // F6
+        73 => 98,  // F7
+        74 => 100, // F8
+        75 => 101, // F9
+        76 => 109, // F10
+        77 => 71,  // NumLock/Clear
+        79 => 89,  // Keypad 7
+        80 => 91,  // Keypad 8
+        81 => 92,  // Keypad 9
+        82 => 78,  // Keypad -
+        83 => 86,  // Keypad 4
+        84 => 87,  // Keypad 5
+        85 => 88,  // Keypad 6
+        86 => 69,  // Keypad +
+        87 => 83,  // Keypad 1
+        88 => 84,  // Keypad 2
+        89 => 85,  // Keypad 3
+        90 => 82,  // Keypad 0
+        91 => 65,  // Keypad .
+        95 => 103, // F11
+        96 => 111, // F12
+        104 => 76, // Keypad Enter
+        105 => 62, // Right Control
+        106 => 75, // Keypad /
+        108 => 61, // Right Option
+        110 => 115, // Home
+        111 => 126, // Up
+        112 => 116, // PageUp
+        113 => 123, // Left
+        114 => 124, // Right
+        115 => 119, // End
+        116 => 125, // Down
+        117 => 121, // PageDown
+        118 => 114, // Insert
+        119 => 117, // ForwardDelete
+        127 => 71,  // Pause -> Clear fallback
+        133 => 55,  // Left Command (Meta)
+        134 => 54,  // Right Command (Meta)
+        _ => key_code,
+    }
+}
+
 impl MacOsInput {
     /// Create a new macOS input handler
     pub fn new() -> Result<Self, PlatformError> {
         Ok(Self { initialized: false })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn ensure_accessibility_permission() -> Result<(), PlatformError> {
+        let trusted = unsafe { AXIsProcessTrusted() != 0 };
+        if trusted {
+            Ok(())
+        } else {
+            Err(PlatformError::PermissionDenied(
+                "缺少 macOS 无障碍权限（系统设置 -> 隐私与安全性 -> 辅助功能）".to_string(),
+            ))
+        }
     }
 }
 
@@ -60,7 +187,9 @@ impl PlatformInput for MacOsInput {
 
         #[cfg(target_os = "macos")]
         {
-            use core_graphics::event::{CGEvent, CGEventType, CGKeyCode};
+            Self::ensure_accessibility_permission()?;
+
+            use core_graphics::event::{CGEvent, CGKeyCode};
             use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
             let source =
@@ -68,13 +197,9 @@ impl PlatformInput for MacOsInput {
                     PlatformError::InitializationFailed("Failed to create event source".to_string())
                 })?;
 
-            let event_type = if pressed {
-                CGEventType::KeyDown
-            } else {
-                CGEventType::KeyUp
-            };
+            let mapped_key = x11_keycode_to_macos(key_code);
 
-            let event = CGEvent::new_keyboard_event(source, key_code as CGKeyCode, pressed)
+            let event = CGEvent::new_keyboard_event(source, mapped_key as CGKeyCode, pressed)
                 .map_err(|_| {
                     PlatformError::InitializationFailed(
                         "Failed to create keyboard event".to_string(),
@@ -84,8 +209,9 @@ impl PlatformInput for MacOsInput {
             event.post(core_graphics::event::CGEventTapLocation::HID);
 
             log::debug!(
-                "Key {} {}",
+                "Key {} -> mac {} {}",
                 key_code,
+                mapped_key,
                 if pressed { "pressed" } else { "released" }
             );
             return Ok(());
@@ -109,7 +235,9 @@ impl PlatformInput for MacOsInput {
     fn inject_mouse_move(&self, dx: i16, dy: i16) -> Result<(), PlatformError> {
         #[cfg(target_os = "macos")]
         {
-            use core_graphics::event::{CGEvent, CGEventType};
+            Self::ensure_accessibility_permission()?;
+
+            use core_graphics::event::CGEvent;
             use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
             use core_graphics::geometry::CGPoint;
 
@@ -123,22 +251,18 @@ impl PlatformInput for MacOsInput {
                 PlatformError::InitializationFailed("Failed to create dummy event".to_string())
             })?;
             let current_location = dummy_event.location();
+            // Barrier/X11 dy is down-positive; Quartz global coordinates are up-positive.
             let new_location = CGPoint {
                 x: current_location.x + dx as f64,
-                y: current_location.y + dy as f64,
+                y: current_location.y - dy as f64,
             };
-
-            let event = CGEvent::new_mouse_event(
-                source,
-                CGEventType::MouseMoved,
-                new_location,
-                core_graphics::event::CGMouseButton::Left,
-            )
-            .map_err(|_| {
-                PlatformError::InitializationFailed("Failed to create mouse move event".to_string())
-            })?;
-
-            event.post(core_graphics::event::CGEventTapLocation::HID);
+            let warp_result = unsafe { CGWarpMouseCursorPosition(new_location) };
+            if warp_result != 0 {
+                return Err(PlatformError::InitializationFailed(format!(
+                    "CGWarpMouseCursorPosition failed: {}",
+                    warp_result
+                )));
+            }
 
             log::debug!("Mouse moved by ({}, {})", dx, dy);
             return Ok(());
@@ -153,6 +277,8 @@ impl PlatformInput for MacOsInput {
     fn inject_mouse_button(&self, button: u8, pressed: bool) -> Result<(), PlatformError> {
         #[cfg(target_os = "macos")]
         {
+            Self::ensure_accessibility_permission()?;
+
             use core_graphics::event::{CGEvent, CGEventType, CGMouseButton};
             use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
